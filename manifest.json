@@ -1,0 +1,12 @@
+{
+  "name": "PROTOCOL: SWARM",
+  "short_name": "SWARM",
+  "description": "Neon arena roguelite protocol. Survive the swarm.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#04010a",
+  "theme_color": "#04010a",
+  "icons": []
+}
