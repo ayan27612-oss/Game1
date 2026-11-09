@@ -1,0 +1,10 @@
+{
+  "name": "protocol-swarm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PROTOCOL: SWARM - zero-dependency neon twin-stick roguelite arena survival",
+  "scripts": {
+    "start": "python3 -m http.server 8080"
+  }
+}
