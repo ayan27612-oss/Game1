@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#04010a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>PROTOCOL: SWARM</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="game" aria-label="PROTOCOL: SWARM game canvas"></canvas>
+  <canvas id="touch-layer" aria-hidden="true"></canvas>
+  <div id="scanlines" aria-hidden="true"></div>
+  <div id="vignette" aria-hidden="true"></div>
+
+  <div id="hud" class="hidden">
+    <div class="hud-corner tl glass">
+      <div class="hud-row">
+        <span class="lvl" id="hud-level">LV 1</span>
+        <span class="hud-name" id="hud-name">OPERATOR // NOVA</span>
+      </div>
+      <div class="bar hp"><div id="hp-fill"></div><span id="hp-text">100 / 100</span></div>
+      <div class="bar xp"><div id="xp-fill"></div><span id="xp-text">XP 0 / 10</span></div>
+    </div>
+
+    <div class="hud-corner tr glass">
+      <div class="stat"><label>SCORE</label><b id="hud-score">0</b></div>
+      <div class="stat"><label>TIME</label><b id="hud-time">00:00</b></div>
+      <div class="stat"><label>KILLS</label><b id="hud-kills">0</b></div>
+      <div class="hud-buttons">
+        <button id="btn-full" class="icon-btn" title="Fullscreen + landscape lock">FS</button>
+        <button id="btn-scan" class="icon-btn" title="CRT scanlines (T)">CRT</button>
+        <button id="btn-mute" class="icon-btn" title="Mute audio (M)">SND</button>
+        <button id="btn-pause" class="icon-btn" title="Pause (P / ESC)">II</button>
+      </div>
+    </div>
+
+    <div class="hud-bottom glass">
+      <div class="heat-wrap">
+        <div class="heat-label"><span>WEAPON HEAT</span><span id="heat-status">READY</span></div>
+        <div class="bar heat"><div id="heat-fill"></div></div>
+      </div>
+      <div id="ability-hud" class="ability-hud"></div>
+      <div class="dash-wrap"><span>DASH</span><div id="dash-pips" class="pips"></div></div>
+      <div id="ally-chip" class="ally-chip"><span class="dot"></span><span id="ally-state">WINGMAN ONLINE</span></div>
+    </div>
+  </div>
+
+  <div id="boss-bar" class="hidden">
+    <div class="boss-label"><span id="boss-name">THE ARCHITECT</span><span id="boss-phase">PHASE I</span></div>
+    <div class="bar boss"><div id="boss-fill"></div></div>
+  </div>
+
+  <div id="menu" class="overlay">
+    <div class="menu-inner glass">
+      <div class="brand">
+        <div class="brand-tag">NEON ARENA // ROGUELITE PROTOCOL</div>
+        <h1>PROTOCOL<span>:</span>SWARM</h1>
+        <p class="tagline">Survive the grid. Draft the protocol. Break the swarm.</p>
+      </div>
+
+      <div class="menu-grid">
+        <div class="menu-main">
+          <div class="menu-actions">
+            <button id="btn-start" class="btn btn-primary">INITIALIZE RUN</button>
+            <button id="btn-fullscreen" class="btn btn-lock">FULLSCREEN + LANDSCAPE</button>
+          </div>
+          <div class="controls glass-inset">
+            <h3>CONTROLS</h3>
+            <ul>
+              <li class="kbd-only"><b>WASD</b><span>Move with inertia</span></li>
+              <li class="touch-only"><b>LEFT STICK</b><span>Move with inertia</span></li>
+              <li class="kbd-only"><b>MOUSE</b><span>Aim turret / hold to fire</span></li>
+              <li class="touch-only"><b>RIGHT STICK</b><span>Aim · hold to fire</span></li>
+              <li class="kbd-only"><b>SPACE</b><span>Directional dash + i-frames</span></li>
+              <li class="touch-only"><b>DASH</b><span>Tap the DASH button</span></li>
+              <li class="kbd-only"><b>Q / E / R / C</b><span>Nova · Aegis · Overdrive · Time Warp</span></li>
+              <li class="touch-only"><b>SUPERPOWERS</b><span>Tap the four buttons above DASH</span></li>
+              <li><b>GAMEPAD</b><span>L-stick move · R-stick aim · RT fire · A dash · Start pause</span></li>
+              <li><b>GAMEPAD</b><span>X Nova · Y Aegis · B Overdrive · LB Time Warp</span></li>
+              <li class="kbd-only"><b>F</b><span>Telemetry · <b>`</b> quadtree debug</span></li>
+              <li class="kbd-only"><b>P / ESC</b><span>Pause · <b>T</b> scanlines · <b>M</b> mute</span></li>
+              <li class="touch-only"><b>II</b><span>Pause from the HUD</span></li>
+            </ul>
+          </div>
+
+          <div class="panel hangar">
+            <h3>HANGAR <span id="hangar-callsign" class="currency">INTERCEPTOR</span></h3>
+            <canvas id="hangar-preview" width="300" height="150" aria-label="Ship preview"></canvas>
+            <div class="hangar-row">
+              <span>HULL</span>
+              <button type="button" class="hangar-btn" data-part="style" data-dir="-1" aria-label="Previous hull">&#8249;</button>
+              <b id="hangar-style">INTERCEPTOR</b>
+              <button type="button" class="hangar-btn" data-part="style" data-dir="1" aria-label="Next hull">&#8250;</button>
+            </div>
+            <div class="hangar-row">
+              <span>PAINT</span>
+              <button type="button" class="hangar-btn" data-part="palette" data-dir="-1" aria-label="Previous paint">&#8249;</button>
+              <b id="hangar-palette">NOVA</b>
+              <button type="button" class="hangar-btn" data-part="palette" data-dir="1" aria-label="Next paint">&#8250;</button>
+            </div>
+            <div class="hangar-row">
+              <span>WINGMAN</span>
+              <button type="button" class="hangar-btn" data-part="ally" data-dir="-1" aria-label="Previous wingman paint">&#8249;</button>
+              <b id="hangar-ally">MINT</b>
+              <button type="button" class="hangar-btn" data-part="ally" data-dir="1" aria-label="Next wingman paint">&#8250;</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="menu-side">
+          <div class="panel">
+            <h3>HIGH SCORES</h3>
+            <ol id="menu-scores" class="score-list"></ol>
+          </div>
+          <div class="panel">
+            <h3>META LAB <span id="menu-currency" class="currency">0 CR</span></h3>
+            <div id="meta-shop" class="meta-shop"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="draft" class="overlay hidden">
+    <div class="draft-inner">
+      <div class="draft-head">
+        <div class="brand-tag">PROTOCOL AUGMENTATION</div>
+        <h2>LEVEL <span id="draft-level">2</span></h2>
+        <p>Select one synergy module</p>
+      </div>
+      <div id="draft-cards" class="draft-cards"></div>
+      <div class="draft-hint">PRESS 1 / 2 / 3 OR CLICK A CARD</div>
+    </div>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <div class="modal glass">
+      <div class="brand-tag">SIMULATION SUSPENDED</div>
+      <h2>PAUSED</h2>
+      <p>Delta accumulator flushed. Resume when ready.</p>
+      <div class="modal-buttons">
+        <button id="btn-resume" class="btn btn-primary">RESUME</button>
+        <button id="btn-quit" class="btn">ABORT RUN</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameover" class="overlay hidden">
+    <div class="modal glass gameover">
+      <div class="brand-tag">RUN TERMINATED</div>
+      <h2>SWARM WINS</h2>
+      <div class="go-stats">
+        <div><label>SCORE</label><b id="go-score">0</b></div>
+        <div><label>SURVIVED</label><b id="go-time">00:00</b></div>
+        <div><label>LEVEL</label><b id="go-level">1</b></div>
+        <div><label>KILLS</label><b id="go-kills">0</b></div>
+      </div>
+      <div id="go-meta" class="go-meta">+0 CR SALVAGED</div>
+      <div class="modal-buttons">
+        <button id="btn-retry" class="btn btn-primary">RE-INITIALIZE</button>
+        <button id="btn-menu" class="btn">MAIN MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
