@@ -10,6 +10,17 @@
 <title>PROTOCOL: SWARM</title>
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "./engine/": "./",
+    "./entities/": "./",
+    "./systems/": "./",
+    "../engine/": "./",
+    "../systems/": "./"
+  }
+}
+</script>
 </head>
 <body>
 <div id="app">
@@ -79,8 +90,7 @@
               <li class="touch-only"><b>RIGHT STICK</b><span>Aim · hold to fire</span></li>
               <li class="kbd-only"><b>SPACE</b><span>Directional dash + i-frames</span></li>
               <li class="touch-only"><b>DASH</b><span>Tap the DASH button</span></li>
-              <li class="kbd-only"><b>Q / E / R / C</b><span>Nova · Aegis · Overdrive · Time Warp</span></li>
-              <li class="touch-only"><b>SUPERPOWERS</b><span>Tap the four buttons above DASH</span></li>
+              <li><b>Q / E / R / C</b><span>Nova · Aegis · Overdrive · Time Warp</span></li>
               <li><b>GAMEPAD</b><span>L-stick move · R-stick aim · RT fire · A dash · Start pause</span></li>
               <li><b>GAMEPAD</b><span>X Nova · Y Aegis · B Overdrive · LB Time Warp</span></li>
               <li class="kbd-only"><b>F</b><span>Telemetry · <b>`</b> quadtree debug</span></li>
@@ -172,6 +182,6 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script type="module" src="src/main.js"></script>
+<script type="module" src="main.js"></script>
 </body>
 </html>
