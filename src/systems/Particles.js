@@ -48,6 +48,8 @@ export class ParticleSystem {
     this.shakeY = 0;
     this.aberration = 0;
     this.flash = 0;
+    this.shakeScale = 1;
+    this.fxScale = 1;
   }
 
   reset() {
@@ -208,13 +210,13 @@ export class ParticleSystem {
   }
 
   addShake(amount) {
-    this.shake = Math.min(32, this.shake + amount);
+    this.shake = Math.min(32, this.shake + amount * this.shakeScale);
   }
 
   hit(intensity = 1) {
-    this.shake = Math.min(32, this.shake + 6 * intensity);
-    this.aberration = Math.min(1.6, this.aberration + 1.0 * intensity);
-    this.flash = Math.min(0.5, this.flash + 0.18 * intensity);
+    this.shake = Math.min(32, this.shake + 6 * intensity * this.shakeScale);
+    this.aberration = Math.min(1.6, this.aberration + 1.0 * intensity * this.fxScale);
+    this.flash = Math.min(0.5, this.flash + 0.18 * intensity * this.fxScale);
   }
 
   update(dt) {

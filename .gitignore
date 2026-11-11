@@ -1,0 +1,14 @@
+# Dependencies (development-only; the game has no runtime dependencies)
+node_modules/
+package-lock.json
+
+# Local tooling / browser automation scratch files
+_*.mjs
+playwright-report/
+test-results/
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini

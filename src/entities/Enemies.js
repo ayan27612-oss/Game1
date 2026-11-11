@@ -41,6 +41,11 @@ class Enemy {
     this.bladeCd = 0;
     this.spawnT = 0.3;
     this.slowTimer = 0;
+    this.elite = false;
+    this.affix = null;
+    this.affixes = [];
+    this.damageReduction = 0;
+    this.lastHitAmount = 0;
   }
 
   slowFactor() {
@@ -62,8 +67,11 @@ class Enemy {
 
   hit(amount, game, ix = 0, iy = 0) {
     if (this.dead) return false;
-    this.hp -= amount;
+    const actual = Math.max(1, amount * (1 - (this.damageReduction || 0)));
+    this.lastHitAmount = actual;
+    this.hp -= actual;
     this.hitFlash = 0.12;
+    if (game) game.damageDealt += actual;
     const kb = this.type === 'boss' ? 0.06 : 0.5;
     this.impulseX += ix * kb;
     this.impulseY += iy * kb;
@@ -92,9 +100,10 @@ class Enemy {
   drawHealthBar(ctx, x, y, w = 28) {
     if (this.hp >= this.maxHp || this.dead) return;
     const ratio = clamp(this.hp / this.maxHp, 0, 1);
+    if (this.elite) w *= 1.45;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(x - w * 0.5, y, w, 3);
-    ctx.fillStyle = this.hitFlash > 0 ? '#ffffff' : '#ff2f8e';
+    ctx.fillStyle = this.hitFlash > 0 ? '#ffffff' : this.elite ? '#ffc857' : '#ff2f8e';
     ctx.fillRect(x - w * 0.5, y, w * ratio, 3);
   }
 }
@@ -218,6 +227,7 @@ class Sniper extends Enemy {
     this.xp = 7;
     this.color = '#ffc857';
     this.telegraph = 0;
+    this.aimLockAngle = 0;
     this.cooldown = rand(0.8, 2.2);
     this.aimAngle = 0;
     this.beamTime = 0;
@@ -260,8 +270,8 @@ class Sniper extends Enemy {
     if (this.beamTime > 0) {
       this.beamTime -= dt;
       if (!this.beamHit) {
-        const ex = this.x + Math.cos(this.aimAngle) * 1500;
-        const ey = this.y + Math.sin(this.aimAngle) * 1500;
+        const ex = this.x + Math.cos(this.aimLockAngle) * 1500;
+        const ey = this.y + Math.sin(this.aimLockAngle) * 1500;
         if (lineCircle(this.x, this.y, ex, ey, player.x, player.y, player.r) >= 0) {
           if (player.takeDamage(this.damage, game)) {
             this.beamHit = true;
@@ -279,21 +289,24 @@ class Sniper extends Enemy {
 
     if (this.telegraph > 0) {
       this.telegraph -= dt;
-      this.aimAngle = toPlayer;
+      const track = normalizeAngle(toPlayer - this.aimLockAngle);
+      this.aimLockAngle += clamp(track, -0.65 * dt, 0.65 * dt);
+      this.aimAngle = this.aimLockAngle;
       if (this.telegraph <= 0) {
-        this.aimAngle = toPlayer;
         this.beamTime = 0.15;
         this.beamHit = false;
         this.cooldown = rand(2.2, 3.1);
         game.audio.enemyShot();
         game.audio.zap();
-        const ex = this.x + Math.cos(this.aimAngle) * 1500;
-        const ey = this.y + Math.sin(this.aimAngle) * 1500;
+        const ex = this.x + Math.cos(this.aimLockAngle) * 1500;
+        const ey = this.y + Math.sin(this.aimLockAngle) * 1500;
         game.particles.lightning(this.x, this.y, ex, ey, '#ffc857', 2.4, 0.18);
       }
     } else {
       this.telegraph = 1.0;
+      this.aimLockAngle = toPlayer;
       this.aimAngle = toPlayer;
+      game.audio.warning();
     }
   }
 
@@ -303,8 +316,8 @@ class Sniper extends Enemy {
 
     if (this.telegraph > 0) {
       const a = 1 - this.telegraph;
-      const ex = x + Math.cos(this.aimAngle) * 1500;
-      const ey = y + Math.sin(this.aimAngle) * 1500;
+      const ex = x + Math.cos(this.aimLockAngle) * 1500;
+      const ey = y + Math.sin(this.aimLockAngle) * 1500;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.strokeStyle = `rgba(255, 200, 87, ${0.14 + a * 0.4})`;
@@ -319,8 +332,8 @@ class Sniper extends Enemy {
     }
 
     if (this.beamTime > 0) {
-      const ex = x + Math.cos(this.aimAngle) * 1500;
-      const ey = y + Math.sin(this.aimAngle) * 1500;
+      const ex = x + Math.cos(this.aimLockAngle) * 1500;
+      const ey = y + Math.sin(this.aimLockAngle) * 1500;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.strokeStyle = 'rgba(255, 200, 87, 0.35)';
@@ -818,6 +831,7 @@ function makeBossBeam() {
 class Boss extends Enemy {
   constructor(x, y, bossIndex, elapsed) {
     super('boss', x, y);
+    this.name = 'THE ARCHITECT';
     this.r = 62;
     this.maxHp = 650 + bossIndex * 500 + elapsed * 4;
     this.hp = this.maxHp;
@@ -1133,15 +1147,316 @@ class Boss extends Enemy {
   }
 }
 
+class Warden extends Enemy {
+  constructor(x, y, bossIndex, elapsed) {
+    super('boss', x, y);
+    this.name = 'THE WARDEN';
+    this.r = 58;
+    this.maxHp = 720 + bossIndex * 480 + elapsed * 4.4;
+    this.hp = this.maxHp;
+    this.speed = 44 + bossIndex * 5;
+    this.damage = 16 + bossIndex * 3;
+    this.score = 760 + bossIndex * 260;
+    this.xp = 150 + bossIndex * 40;
+    this.color = '#46f4ff';
+    this.phase = 1;
+    this.radialTimer = 1.5;
+    this.volleyTimer = 2.3;
+    this.summonTimer = 6.5;
+    this.beamTimer = 3.8;
+    this.orbit = rand(0, TAU);
+    this.volleyAngle = 0;
+    this.beams = new Array(3);
+    for (let i = 0; i < 3; i++) this.beams[i] = makeBossBeam();
+  }
+
+  _phaseCheck(game) {
+    const ratio = this.hp / this.maxHp;
+    const next = ratio < 0.33 ? 3 : ratio < 0.66 ? 2 : 1;
+    if (next > this.phase) {
+      this.phase = next;
+      const color = this.phase === 3 ? '#ff2f8e' : '#46f4ff';
+      game.particles.ring(this.x, this.y, color, 46, 760, 0.75, 6);
+      game.particles.ring(this.x, this.y, '#ffffff', 22, 520, 0.5, 3);
+      game.particles.sparkBurst(this.x, this.y, 44, color, 540, 3.4, 0.95);
+      game.particles.addShake(18);
+      game.particles.hit(1.2);
+      game.particles.text(this.x, this.y - 92, this.phase === 3 ? 'FINAL PHASE' : 'PHASE II', '#dffbff', 22, 1.6);
+      game.audio.boss();
+    }
+  }
+
+  _startBeams(game) {
+    const count = this.phase >= 3 ? 3 : 2;
+    const base = Math.atan2(game.player.y - this.y, game.player.x - this.x);
+    for (let i = 0; i < this.beams.length; i++) {
+      const b = this.beams[i];
+      b.active = i < count;
+      if (!b.active) continue;
+      b.angle = base + (i / count) * TAU;
+      b.telegraph = 1.05;
+      b.activeTime = 0.55;
+      b.rotation = this.phase >= 3 ? 0.8 : 0.52;
+    }
+    game.particles.text(this.x, this.y - 84, 'PRISM LOCK', '#8be9ff', 16, 1.1);
+    game.audio.warning();
+  }
+
+  _volley(game, toPlayer) {
+    const count = this.phase >= 2 ? 5 : 3;
+    const spread = 0.13;
+    for (let i = 0; i < count; i++) {
+      const a = toPlayer + (i - (count - 1) * 0.5) * spread;
+      game.spawnEnemyBullet(
+        this.x + Math.cos(a) * (this.r + 8),
+        this.y + Math.sin(a) * (this.r + 8),
+        Math.cos(a) * 360,
+        Math.sin(a) * 360,
+        5,
+        this.damage * 0.4,
+        4.6,
+        '#8be9ff',
+        4
+      );
+    }
+    game.particles.ring(this.x, this.y, '#46f4ff', 18, 260, 0.35, 2);
+    game.audio.enemyShot();
+  }
+
+  _radial(game) {
+    const count = this.phase >= 3 ? 20 : 14;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * TAU + this.orbit;
+      game.spawnEnemyBullet(
+        this.x + Math.cos(a) * (this.r + 6),
+        this.y + Math.sin(a) * (this.r + 6),
+        Math.cos(a) * 205,
+        Math.sin(a) * 205,
+        6,
+        this.damage * 0.42,
+        5.2,
+        '#46f4ff',
+        4.6
+      );
+    }
+    game.particles.ring(this.x, this.y, '#46f4ff', 20, 250, 0.35, 2);
+    game.audio.zap();
+  }
+
+  update(dt, game, manager) {
+    this.updateTimers(dt);
+    this._phaseCheck(game);
+
+    const player = game.player;
+    const dx = player.x - this.x;
+    const dy = player.y - this.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const toPlayer = Math.atan2(dy, dx);
+    this.angle = toPlayer;
+
+    this.orbit += dt * (0.24 + this.phase * 0.05);
+    const desired = this.phase === 3 ? 210 : 280;
+    let mx = 0;
+    let my = 0;
+    if (dist > desired + 50) {
+      mx = dx / dist;
+      my = dy / dist;
+    } else if (dist < desired - 50) {
+      mx = -dx / dist;
+      my = -dy / dist;
+    }
+    mx += Math.cos(this.orbit) * 0.7;
+    my += Math.sin(this.orbit) * 0.7;
+    const ml = Math.hypot(mx, my) || 1;
+    const sp = this.speed * (this.phase === 3 ? 1.3 : 1) * this.slowFactor();
+    this.vx += ((mx / ml) * sp - this.vx) * Math.min(1, dt * 1.7);
+    this.vy += ((my / ml) * sp - this.vy) * Math.min(1, dt * 1.7);
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.applyImpulse(dt);
+    this.clampWorld(game);
+
+    this.volleyTimer -= dt;
+    if (this.volleyTimer <= 0) {
+      this._volley(game, toPlayer);
+      this.volleyTimer = this.phase === 3 ? 1.5 : 2.2;
+    }
+
+    this.radialTimer -= dt;
+    if (this.radialTimer <= 0) {
+      this._radial(game);
+      this.radialTimer = this.phase === 3 ? 2.2 : 3.1;
+    }
+
+    this.summonTimer -= dt;
+    if (this.summonTimer <= 0) {
+      if (this.phase >= 2) {
+        for (let i = 0; i < (this.phase === 3 ? 2 : 1); i++) {
+          const a = rand(0, TAU);
+          manager.spawn('hex', this.x + Math.cos(a) * 86, this.y + Math.sin(a) * 86, game.elapsed);
+        }
+      } else {
+        manager.spawnSwarm(this.x + rand(-50, 50), this.y + rand(-50, 50), 4, 1.1, game.elapsed);
+      }
+      game.particles.ring(this.x, this.y, '#8b5cff', 34, 470, 0.55, 3);
+      this.summonTimer = this.phase === 3 ? 6 : 7.5;
+    }
+
+    this.beamTimer -= dt;
+    if (this.beamTimer <= 0) {
+      this._startBeams(game);
+      this.beamTimer = this.phase === 3 ? 4.2 : 5.4;
+    }
+
+    for (let i = 0; i < this.beams.length; i++) {
+      const b = this.beams[i];
+      if (!b.active) continue;
+      if (b.telegraph > 0) {
+        b.telegraph -= dt;
+        b.angle += b.rotation * dt;
+        if (b.telegraph <= 0) {
+          b.activeTime = 0.55;
+          game.particles.addShake(8);
+          game.audio.zap();
+        }
+      } else {
+        b.activeTime -= dt;
+        b.angle += b.rotation * 2.1 * dt;
+        const ex = this.x + Math.cos(b.angle) * 1600;
+        const ey = this.y + Math.sin(b.angle) * 1600;
+        if (lineCircle(this.x, this.y, ex, ey, player.x, player.y, player.r) >= 0) {
+          player.takeDamage(this.damage * 0.55, game);
+        }
+        if (b.activeTime <= 0) b.active = false;
+      }
+    }
+  }
+
+  drawBeams(ctx) {
+    for (let i = 0; i < this.beams.length; i++) {
+      const b = this.beams[i];
+      if (!b.active) continue;
+      const ex = this.x + Math.cos(b.angle) * 1600;
+      const ey = this.y + Math.sin(b.angle) * 1600;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      if (b.telegraph > 0) {
+        const a = 1 - b.telegraph / 1.05;
+        ctx.strokeStyle = `rgba(70, 244, 255, ${0.15 + a * 0.45})`;
+        ctx.lineWidth = 2;
+        ctx.setLineDash(TELEGRAPH_DASH);
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.strokeStyle = 'rgba(70, 244, 255, 0.35)';
+        ctx.lineWidth = 18;
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.strokeStyle = '#dffbff';
+        ctx.lineWidth = 4.5;
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  draw(ctx, alpha) {
+    this.drawBeams(ctx);
+    const x = this.px + (this.x - this.px) * alpha;
+    const y = this.py + (this.y - this.py) * alpha;
+    const R = this.r;
+    const color = this.phase === 3 ? '#ff2f8e' : this.phase === 2 ? '#8be9ff' : '#46f4ff';
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(70, 244, 255, 0.24)';
+    ctx.lineWidth = 1.5;
+    for (let ring = 0; ring < 3; ring++) {
+      const rr = R + 18 + ring * 14 + Math.sin(this.age * 1.8 + ring) * 4;
+      const start = this.age * (0.5 + ring * 0.18);
+      ctx.beginPath();
+      ctx.arc(0, 0, rr, start, start + Math.PI * 1.15);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-this.age * 0.42);
+    ctx.fillStyle = this.hitFlash > 0 ? '#ffffff' : 'rgba(5, 30, 42, 0.96)';
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 26;
+    ctx.beginPath();
+    const points = 6;
+    for (let i = 0; i < points; i++) {
+      const a = (i / points) * TAU;
+      const rr = i % 2 === 0 ? R : R * 0.82;
+      const px = Math.cos(a) * rr;
+      const py = Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(this.age * 0.75);
+    ctx.strokeStyle = 'rgba(223, 251, 255, 0.7)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, R * 0.55, (i / 3) * TAU, (i / 3) * TAU + 0.9);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const pulse = 1 + Math.sin(this.age * 4.5) * 0.1;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16 * pulse, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.92;
+    ctx.beginPath();
+    ctx.arc(0, 0, 7 * pulse, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
 export class EnemyManager {
   constructor() {
     this.enemies = [];
     this.boss = null;
+    this.eliteChance = 0;
+    this.eliteSpawned = 0;
   }
 
   reset() {
     this.enemies.length = 0;
     this.boss = null;
+    this.eliteChance = 0;
+    this.eliteSpawned = 0;
   }
 
   prevAll() {
@@ -1155,7 +1470,32 @@ export class EnemyManager {
     return { hp: baseHp * hpMul, speed: baseSpeed * speedMul, damage: baseDamage * dmgMul };
   }
 
-  spawn(type, x, y, elapsed = 0) {
+  _makeElite(e, elapsed) {
+    e.elite = true;
+    e.eliteSpawned = ++this.eliteSpawned;
+    const roll = Math.random();
+    e.affix = roll < 0.38 ? 'armored' : roll < 0.72 ? 'volatile' : 'swift';
+    e.affixes = [e.affix];
+    const hpMul = 2.25 + Math.min(1.5, elapsed * 0.004);
+    e.maxHp *= hpMul;
+    e.hp = e.maxHp;
+    e.damage *= 1.28;
+    e.score = Math.round(e.score * 3.2);
+    e.xp = Math.round(e.xp * 2.4);
+    e.r *= 1.13;
+    if (e.affix === 'swift') {
+      e.speed *= 1.45;
+      e.color = '#ffc857';
+    } else if (e.affix === 'armored') {
+      e.damageReduction = 0.3;
+      e.color = '#8be9ff';
+    } else {
+      e.color = '#ff8a66';
+    }
+    return e;
+  }
+
+  spawn(type, x, y, elapsed = 0, opts = {}) {
     let e;
     if (type === 'swarmer') {
       const s = this._scaledStats(20, 142, 5, elapsed);
@@ -1195,6 +1535,9 @@ export class EnemyManager {
     } else {
       e = new Swarmer(x, y, 1);
     }
+    if (type !== 'swarmer' && opts.allowElite !== false && elapsed > 40 && Math.random() < this.eliteChance) {
+      this._makeElite(e, elapsed);
+    }
     this.enemies.push(e);
     return e;
   }
@@ -1203,7 +1546,7 @@ export class EnemyManager {
     for (let i = 0; i < count; i++) {
       const a = rand(0, TAU);
       const r = rand(10, 72);
-      const e = this.spawn('swarmer', x + Math.cos(a) * r, y + Math.sin(a) * r, elapsed);
+      const e = this.spawn('swarmer', x + Math.cos(a) * r, y + Math.sin(a) * r, elapsed, { allowElite: false });
       if (scale !== 1) {
         e.hp *= scale;
         e.maxHp *= scale;
@@ -1212,7 +1555,16 @@ export class EnemyManager {
   }
 
   spawnBoss(x, y, bossIndex, elapsed) {
-    const boss = new Boss(x, y, bossIndex, elapsed);
+    let boss;
+    if (bossIndex % 2 === 1) {
+      boss = new Warden(x, y, bossIndex, elapsed);
+      const prime = Math.floor(bossIndex / 2);
+      if (prime > 0) boss.name = `THE WARDEN // ${prime > 1 ? 'OMEGA' : 'PRIME'}`;
+    } else {
+      boss = new Boss(x, y, bossIndex, elapsed);
+      const prime = Math.floor(bossIndex / 2);
+      if (prime > 0) boss.name = `THE ARCHITECT // ${prime > 1 ? 'OMEGA' : 'PRIME'}`;
+    }
     this.enemies.push(boss);
     this.boss = boss;
     return boss;
