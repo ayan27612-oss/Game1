@@ -75,12 +75,17 @@ export class Player {
       novaBonus: 0,
       shieldBonus: 0,
       allyDamage: 0,
-      allyRate: 0
+      allyRate: 0,
+      execute: 0,
+      abilityIFrames: 0,
+      dashShock: 0,
+      rerolls: 2,
+      reviveCharges: 0
     };
 
     this.abilities = {};
     for (let i = 0; i < ABILITIES.length; i++) this.abilities[ABILITIES[i].id] = { cd: 0 };
-    this.buffs = { shield: 0, overdrive: 0, timewarp: 0 };
+    this.buffs = { shield: 0, overdrive: 0, timewarp: 0, overcharge: 0 };
 
     this.hp = this.stats.maxHp;
     this.heat = 0;
@@ -100,6 +105,7 @@ export class Player {
     this.ghosts = new Array(GHOST_COUNT);
     for (let i = 0; i < GHOST_COUNT; i++) this.ghosts[i] = makeGhost();
     this.upgradeCounts = Object.create(null);
+    this.synergies = new Set();
     this.aimX = x + 100;
     this.aimY = y;
   }
@@ -128,6 +134,7 @@ export class Player {
     this.buffs.shield = Math.max(0, this.buffs.shield - dt);
     this.buffs.overdrive = Math.max(0, this.buffs.overdrive - dt);
     this.buffs.timewarp = Math.max(0, this.buffs.timewarp - dt);
+    this.buffs.overcharge = Math.max(0, this.buffs.overcharge - dt);
 
     if (input.consumeAbilities) {
       const queued = input.consumeAbilities();
@@ -291,6 +298,24 @@ export class Player {
     if (stats.singularityDash > 0) {
       game.spawnSingularity(this.x, this.y, stats.singularityDash);
     }
+
+    if (stats.dashShock > 0) {
+      const radius = 96 + stats.dashShock * 26;
+      const damage = 10 + stats.dashShock * 12 + stats.damage * 0.25;
+      game.particles.ring(this.x, this.y, '#8b5cff', 12, radius * 3.6, 0.4, 3);
+      const list = game.enemies.enemies;
+      for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        if (e.dead) continue;
+        const dx = e.x - this.x;
+        const dy = e.y - this.y;
+        const rr = radius + e.r;
+        if (dx * dx + dy * dy > rr * rr) continue;
+        const died = e.hit(damage, game, dx * 0.18, dy * 0.18);
+        game.particles.sparkBurst(e.x, e.y, 4, '#b28cff', 220, 2.2, 0.32);
+        if (died) game.onEnemyKilled(e);
+      }
+    }
     return true;
   }
 
@@ -351,6 +376,9 @@ export class Player {
     if (!cfg || !slot || slot.cd > 0 || this.hp <= 0) return false;
     slot.cd = cfg.cooldown * this.stats.cooldownMult;
     const power = this.stats.abilityPower;
+    if (this.stats.abilityIFrames > 0) {
+      this.invuln = Math.max(this.invuln, this.stats.abilityIFrames);
+    }
     game.audio.select();
 
     if (id === 'nova') {
@@ -405,11 +433,12 @@ export class Player {
     const base = this.angle - totalSpread * 0.5;
     const rage = 1 + stats.berserk * clamp(1 - this.hp / stats.maxHp, 0, 1);
     const driveMul = this.buffs.overdrive > 0 ? 1.3 : 1;
+    const chargeMul = this.buffs.overcharge > 0 ? 1.35 : 1;
 
     for (let i = 0; i < shots; i++) {
       const a = base + stats.spread * i + rand(-0.008, 0.008);
       const crit = Math.random() < stats.crit;
-      const dmg = stats.damage * rage * driveMul * (crit ? stats.critMult : 1);
+      const dmg = stats.damage * rage * driveMul * chargeMul * (crit ? stats.critMult : 1);
       const sx = this.x + Math.cos(a) * 21;
       const sy = this.y + Math.sin(a) * 21;
       game.spawnPlayerBullet(
@@ -453,7 +482,10 @@ export class Player {
     this.hp = Math.min(this.stats.maxHp, this.hp + amount);
     const gained = Math.round(this.hp - before);
     if (gained > 0 && game) {
-      game.particles.text(this.x, this.y - 30, '+' + gained, '#59ffa8', 14, 0.9);
+      game.healingDone += gained;
+      if (game.settings?.damageNumbers !== false) {
+        game.particles.text(this.x, this.y - 30, '+' + gained, '#59ffa8', 14, 0.9);
+      }
       game.particles.ring(this.x, this.y, '#59ffa8', 8, 120, 0.35, 2);
       game.audio.pickup();
     }
@@ -470,15 +502,34 @@ export class Player {
     this.hp -= actual;
     this.invuln = 0.8;
     this.hitFlash = 0.28;
+    game.damageTaken += actual;
+    game.onPlayerHit(actual);
     game.particles.hit(1);
-    game.particles.text(this.x, this.y - 30, '-' + Math.round(actual), '#ff5b8f', 15, 0.85);
+    if (game.settings?.damageNumbers !== false) {
+      game.particles.text(this.x, this.y - 30, '-' + Math.round(actual), '#ff5b8f', 15, 0.85);
+    }
     game.particles.sparkBurst(this.x, this.y, 16, '#ff2f8e', 360, 2.6, 0.5);
     game.audio.hit();
     buzz(22);
     if (this.stats.thorns > 0) this._thornsNova(game);
     if (this.hp <= 0) {
-      this.hp = 0;
-      game.onPlayerDeath();
+      if (this.reviveCharges > 0) {
+        this.reviveCharges--;
+        this.hp = Math.max(1, this.stats.maxHp * 0.35);
+        this.invuln = 2.4;
+        this.hitFlash = 0;
+        game.revivesUsed++;
+        game.particles.ring(this.x, this.y, '#ffc857', 30, 900, 0.8, 6);
+        game.particles.ring(this.x, this.y, '#ffffff', 16, 520, 0.6, 3);
+        game.particles.sparkBurst(this.x, this.y, 45, '#ffe066', 600, 3.4, 1.1);
+        game.particles.text(this.x, this.y - 56, 'EMERGENCY PROTOCOL', '#ffc857', 19, 2);
+        game.particles.addShake(16);
+        game.audio.bossDeath();
+        buzz([30, 40, 80]);
+      } else {
+        this.hp = 0;
+        game.onPlayerDeath();
+      }
     }
     return true;
   }
@@ -583,6 +634,19 @@ export class Player {
       ctx.setLineDash([5, 7]);
       ctx.beginPath();
       ctx.arc(0, 0, 33, 0, TAU);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+
+    if (this.buffs.overcharge > 0) {
+      const pulse = 1 + Math.sin(this.buffs.overcharge * 18) * 0.08;
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = '#ffe066';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 30 * pulse, 0, TAU);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;

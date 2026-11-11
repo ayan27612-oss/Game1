@@ -23,6 +23,8 @@ export class AudioSynth {
     this.sfxBus = null;
     this.noiseBuffer = null;
     this.muted = false;
+    this.musicVolume = 0.34;
+    this.sfxVolume = 0.9;
     this.musicPlaying = false;
     this.timer = null;
     this.nextTime = 0;
@@ -62,7 +64,7 @@ export class AudioSynth {
     comp.connect(ctx.destination);
 
     this.musicBus = ctx.createGain();
-    this.musicBus.gain.value = 0.34;
+    this.musicBus.gain.value = this.musicVolume;
     this.musicBus.connect(this.master);
 
     this.leadBus = ctx.createGain();
@@ -70,7 +72,7 @@ export class AudioSynth {
     this.leadBus.connect(this.musicBus);
 
     this.sfxBus = ctx.createGain();
-    this.sfxBus.gain.value = 0.9;
+    this.sfxBus.gain.value = this.sfxVolume;
     this.sfxBus.connect(this.master);
 
     const delay = ctx.createDelay(0.6);
@@ -112,6 +114,26 @@ export class AudioSynth {
     return this.muted;
   }
 
+  setVolumes({ music, sfx, muted } = {}) {
+    if (Number.isFinite(music)) this.musicVolume = Math.max(0, Math.min(1, music)) * 0.6;
+    if (Number.isFinite(sfx)) this.sfxVolume = Math.max(0, Math.min(1, sfx));
+    if (typeof muted === 'boolean') this.muted = muted;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    if (this.master) {
+      this.master.gain.cancelScheduledValues(t);
+      this.master.gain.linearRampToValueAtTime(this.muted ? 0 : 0.55, t + 0.08);
+    }
+    if (this.musicBus && !this.musicPlaying) {
+      this.musicBus.gain.cancelScheduledValues(t);
+      this.musicBus.gain.linearRampToValueAtTime(this.musicVolume, t + 0.08);
+    }
+    if (this.sfxBus) {
+      this.sfxBus.gain.cancelScheduledValues(t);
+      this.sfxBus.gain.linearRampToValueAtTime(this.sfxVolume, t + 0.08);
+    }
+  }
+
   setLowHP(low) {
     if (this.lowHp === low) return;
     this.lowHp = low;
@@ -122,7 +144,7 @@ export class AudioSynth {
     if (!this.ctx || !this.musicBus) return;
     const t = this.ctx.currentTime;
     this.musicBus.gain.cancelScheduledValues(t);
-    this.musicBus.gain.linearRampToValueAtTime(paused ? 0.08 : 0.34, t + 0.15);
+    this.musicBus.gain.linearRampToValueAtTime(this.musicVolume * (paused ? 0.24 : 1), t + 0.15);
   }
 
   startMusic() {

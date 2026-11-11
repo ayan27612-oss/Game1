@@ -20,6 +20,8 @@ import {
   applyUpgrade,
   META_UNLOCKS
 } from './systems/Upgrades.js';
+import { getDoctrine, isDoctrineUnlocked } from './systems/Doctrines.js';
+import { checkSynergies } from './systems/Synergies.js';
 
 class BulletPool {
   constructor(size) {
@@ -172,7 +174,18 @@ class PickupPool {
       p.x = clamp(p.x, 20, game.world.w - 20);
       p.y = clamp(p.y, 20, game.world.h - 20);
       if (d < player.r + 14) {
-        if (p.type === 'health') player.heal(22, game);
+        if (p.type === 'health') {
+          player.heal(22, game);
+        } else if (p.type === 'overcharge') {
+          player.buffs.overcharge = Math.max(player.buffs.overcharge, 8);
+          player.heat = Math.max(0, player.heat - 0.2);
+          game.particles.ring(player.x, player.y, '#ffe066', 18, 320, 0.5, 3);
+          game.particles.sparkBurst(player.x, player.y, 16, '#fff3b0', 300, 2.6, 0.5);
+          if (game.settings?.damageNumbers !== false) {
+            game.particles.text(player.x, player.y - 40, 'OVERCHARGE', '#ffe066', 16, 1.2);
+          }
+          game.audio.zap();
+        }
         this.release(p);
       }
     }
@@ -225,6 +238,12 @@ export class Game {
     this.save = opts.save;
     this.onLevelUp = opts.onLevelUp || (() => {});
     this.onGameOver = opts.onGameOver || (() => {});
+    this.onSynergy = opts.onSynergy || (() => {});
+    this.onThreat = opts.onThreat || (() => {});
+    this.onBoss = opts.onBoss || (() => {});
+    this.settings = opts.settings || {};
+    this.doctrine = getDoctrine(opts.doctrine || this.save.doctrine || 'vanguard');
+    if (!isDoctrineUnlocked(this.doctrine, this.save)) this.doctrine = getDoctrine('vanguard');
 
     this.world = { w: 4200, h: 3200 };
     this.tilt = CAM_TILT;
@@ -236,7 +255,7 @@ export class Game {
     this.player = new Player(this.world.w * 0.5, this.world.h * 0.5, {
       style: shipStyle,
       colors: playerPal,
-      callsign: playerPal.name
+      callsign: shipCfg.callsign || playerPal.name
     });
     this.ally = new Ally(this.player.x - 70, this.player.y, {
       style: (shipStyle + 1) % SHIP_STYLES.length,
@@ -281,6 +300,19 @@ export class Game {
     this.finalized = false;
     this.debugQuadtree = false;
 
+    this.threat = 1;
+    this.nextThreat = 45;
+    this.combo = 0;
+    this.comboTimer = 0;
+    this.comboBest = 0;
+    this.damageDealt = 0;
+    this.damageTaken = 0;
+    this.healingDone = 0;
+    this.elitesKilled = 0;
+    this.bossKills = 0;
+    this.revivesUsed = 0;
+    this.rerolls = 2;
+
     this.swarmTimer = 1.6;
     this.sniperTimer = 8;
     this.hexTimer = 14;
@@ -320,8 +352,15 @@ export class Game {
       const meta = META_UNLOCKS.find((m) => m.id === this.save.unlocks[i]);
       if (meta) meta.apply(this.player);
     }
+    this.doctrine.apply(this.player);
+    this.player.stats.maxHp = Math.max(40, this.player.stats.maxHp);
     this.player.hp = this.player.stats.maxHp;
     this.player.dashCharges = this.player.stats.maxDashCharges;
+    this.rerollCap = Math.max(0, Math.floor(this.player.stats.rerolls));
+    this.rerolls = this.rerollCap;
+
+    this.particles.shakeScale = this.settings.screenShake === false ? 0 : 1;
+    this.particles.fxScale = this.settings.reducedMotion ? 0.25 : 1;
 
     this._clampCamera();
   }
@@ -452,7 +491,21 @@ export class Game {
 
     this.elapsed += dt;
     Quadtree.resetStats();
-    if (this.input.poll) this.input.poll();
+
+    this.comboTimer -= dt;
+    if (this.comboTimer <= 0 && this.combo > 0) {
+      this.combo = 0;
+    }
+    this.enemies.eliteChance = this.elapsed > 40
+      ? Math.min(0.18, 0.02 + this.threat * 0.012 + this.elapsed * 0.00035)
+      : 0;
+    if (this.elapsed >= this.nextThreat) {
+      this.threat++;
+      this.nextThreat += 45;
+      this.onThreat(this.threat);
+      this.particles.text(this.player.x, this.player.y - 76, `THREAT LEVEL ${this.threat}`, '#ffc857', 18, 1.8);
+      this.audio.warning();
+    }
 
     this.camera.px = this.camera.x;
     this.camera.py = this.camera.y;
@@ -603,13 +656,14 @@ export class Game {
 
     if (!this.enemies.boss && this.elapsed >= this.nextBoss) {
       const p = this._spawnPoint();
-      this.enemies.spawnBoss(p.x, p.y, this.bossCount, diff);
+      const boss = this.enemies.spawnBoss(p.x, p.y, this.bossCount, diff);
       this.bossCount++;
       this.nextBoss += 105;
       this.audio.warning();
       this.audio.boss();
       this.particles.addShake(16);
-      this.particles.text(this.player.x, this.player.y - 80, 'WARNING: THE ARCHITECT', '#ff2f8e', 20, 2.2);
+      this.particles.text(this.player.x, this.player.y - 80, `WARNING: ${boss.name}`, '#ff2f8e', 20, 2.2);
+      this.onBoss(boss);
     }
   }
 
@@ -777,24 +831,30 @@ export class Game {
 
         if (b.hitCount < 8) b.hits[b.hitCount++] = e.id;
 
-        const died = e.hit(b.damage, this, b.vx * 0.06, b.vy * 0.06);
+        let hitDamage = b.damage;
+        if (player.stats.execute > 0 && e.hp / e.maxHp < 0.3) {
+          hitDamage *= 1 + player.stats.execute;
+        }
+        const died = e.hit(hitDamage, this, b.vx * 0.06, b.vy * 0.06);
         if (player.stats.frost > 0) {
           e.slowTimer = Math.max(e.slowTimer, 1.2 + player.stats.frost * 0.25);
         }
         if (player.stats.lifesteal > 0) {
-          player.hp = Math.min(player.stats.maxHp, player.hp + b.damage * player.stats.lifesteal);
+          player.hp = Math.min(player.stats.maxHp, player.hp + hitDamage * player.stats.lifesteal);
         }
 
         this.particles.sparkBurst(b.x, b.y, 5, b.color, 250, 2.2, 0.32);
         const crit = b.color === '#ffe066';
-        this.particles.text(
-          e.x + rand(-7, 7),
-          e.y - e.r - 8,
-          String(Math.round(b.damage)),
-          crit ? '#ffe066' : '#dffbff',
-          crit ? 16 : 12,
-          0.6
-        );
+        if (this.settings.damageNumbers !== false) {
+          this.particles.text(
+            e.x + rand(-7, 7),
+            e.y - e.r - 8,
+            String(Math.round(e.lastHitAmount || hitDamage)),
+            crit ? '#ffe066' : '#dffbff',
+            crit ? 16 : 12,
+            0.6
+          );
+        }
         this.audio.impact(crit);
 
         if (b.chain > 0 && Math.random() < 0.35) {
@@ -848,8 +908,10 @@ export class Game {
       this.chainHits.push(best.id);
       this.particles.lightning(fromX, fromY, best.x, best.y, '#8be9ff', 2.4, 0.2);
       this.particles.sparkBurst(best.x, best.y, 5, '#8be9ff', 200, 2, 0.3);
-      this.particles.text(best.x, best.y - best.r - 8, String(Math.round(chainDamage)), '#8be9ff', 12, 0.6);
       const died = best.hit(chainDamage, this, 0, 0);
+      if (this.settings.damageNumbers !== false) {
+        this.particles.text(best.x, best.y - best.r - 8, String(Math.round(best.lastHitAmount || chainDamage)), '#8be9ff', 12, 0.6);
+      }
       if (this.player.stats.frost > 0) {
         best.slowTimer = Math.max(best.slowTimer, 1.2 + this.player.stats.frost * 0.25);
       }
@@ -934,12 +996,63 @@ export class Game {
     }
   }
 
+  get comboMultiplier() {
+    return 1 + Math.min(3, this.combo * 0.04);
+  }
+
+  onPlayerHit(amount) {
+    if (this.combo >= 10) {
+      this.particles.text(this.player.x, this.player.y - 48, 'CHAIN BROKEN', '#ff8dc0', 13, 0.9);
+    }
+    this.combo = Math.floor(this.combo * 0.5);
+    this.comboTimer = Math.max(this.comboTimer, 0.9);
+    if (this.particles.shakeScale > 0) this.particles.addShake(Math.min(6, amount * 0.25));
+  }
+
+  _detonate(e) {
+    const volatile = e.elite && e.affix === 'volatile';
+    const radius = volatile ? 150 : 165;
+    const r2 = radius * radius;
+    const p = this.player;
+    if (dist2(p.x, p.y, e.x, e.y) < r2) {
+      const d = Math.sqrt(dist2(p.x, p.y, e.x, e.y));
+      const base = volatile ? 20 + e.damage * 1.3 : 16 + e.damage * 1.6;
+      p.takeDamage(base * (1 - d / radius * 0.55), this);
+    }
+    if (this.ally && !this.ally.downed && dist2(this.ally.x, this.ally.y, e.x, e.y) < r2) {
+      this.ally.takeDamage(e.damage * 1.4, this);
+    }
+    this.particles.ring(e.x, e.y, volatile ? '#b06bff' : '#ff8a66', 26, 760, 0.6, 6);
+    this.particles.ring(e.x, e.y, '#fff3e0', 14, 480, 0.4, 3);
+    this.particles.sparkBurst(e.x, e.y, volatile ? 42 : 34, volatile ? '#c8b6ff' : '#ffb37a', 540, 3.2, 0.8);
+    this.particles.addShake(12);
+    this.particles.hit(0.7);
+    this.audio.explosion(true);
+    this.particles.text(e.x, e.y - 46, volatile ? 'VOLATILE BURST' : 'DETONATION', volatile ? '#c8b6ff' : '#ffb37a', 16, 1.1);
+  }
+
   onEnemyKilled(e) {
     if (e.rewarded) return;
     e.rewarded = true;
     this.kills++;
-    this.score += e.score;
+    this.combo++;
+    this.comboTimer = 3.4;
+    this.comboBest = Math.max(this.comboBest, this.combo);
+    const multiplier = this.comboMultiplier;
+    this.score += Math.round(e.score * multiplier);
     this.gainXp(e.xp);
+
+    if (this.combo === 10 || this.combo === 25 || this.combo === 50 || this.combo === 100) {
+      this.particles.text(
+        this.player.x,
+        this.player.y - 66,
+        `CHAIN x${this.combo} // ${multiplier.toFixed(1)}x`,
+        this.combo >= 50 ? '#ff2f8e' : '#ffc857',
+        18,
+        1.6
+      );
+      this.audio.levelUp();
+    }
 
     const isBoss = e.type === 'boss';
     const color = isBoss ? '#ff2f8e' : e.color;
@@ -949,38 +1062,30 @@ export class Game {
     this.audio.explosion(isBoss);
 
     if (isBoss) {
+      this.bossKills++;
       this.enemies.boss = null;
-      this.particles.text(e.x, e.y - 70, 'ARCHITECT TERMINATED', '#ffd1e6', 22, 2.4);
+      this.particles.text(e.x, e.y - 70, `${e.name || 'ARCHITECT'} TERMINATED`, '#ffd1e6', 22, 2.4);
       this.particles.hit(1.6);
       this.audio.bossDeath();
       for (let i = 0; i < 4; i++) {
         this.pickups.spawn(e.x + rand(-50, 50), e.y + rand(-50, 50), 'health');
       }
+      this.pickups.spawn(e.x, e.y, 'overcharge');
     } else {
       if (e.type === 'bomber') {
-        const radius = 165;
-        const r2 = radius * radius;
-        const p = this.player;
-        if (dist2(p.x, p.y, e.x, e.y) < r2) {
-          const d = Math.sqrt(dist2(p.x, p.y, e.x, e.y));
-          p.takeDamage((16 + e.damage * 1.6) * (1 - d / radius * 0.55), this);
-        }
-        if (this.ally && !this.ally.downed && dist2(this.ally.x, this.ally.y, e.x, e.y) < r2) {
-          this.ally.takeDamage(e.damage * 1.4, this);
-        }
-        this.particles.ring(e.x, e.y, '#ff8a66', 26, 760, 0.6, 6);
-        this.particles.ring(e.x, e.y, '#fff3e0', 14, 480, 0.4, 3);
-        this.particles.sparkBurst(e.x, e.y, 34, '#ffb37a', 540, 3.2, 0.8);
-        this.particles.addShake(12);
-        this.particles.hit(0.7);
-        this.audio.explosion(true);
-        this.particles.text(e.x, e.y - 46, 'DETONATION', '#ffb37a', 16, 1.1);
+        this._detonate(e);
       } else if (e.type === 'splitter') {
         this.enemies.spawnSwarm(e.x, e.y, 2, 0.72, this.elapsed);
         this.particles.ring(e.x, e.y, '#59ffa8', e.r, 420, 0.55, 3);
         this.particles.text(e.x, e.y - 38, 'SPLIT', '#8bffc4', 13, 1.0);
       }
-      if (Math.random() < 0.07) {
+      if (e.elite) {
+        this.elitesKilled++;
+        this.pickups.spawn(e.x + rand(-16, 16), e.y + rand(-16, 16), 'health');
+        if (Math.random() < 0.55) this.pickups.spawn(e.x + rand(-24, 24), e.y + rand(-24, 24), 'overcharge');
+        if (e.affix === 'volatile' && e.type !== 'bomber') this._detonate(e);
+        this.particles.text(e.x, e.y - (e.r + 20), 'ELITE DOWN', '#ffc857', 14, 1.1);
+      } else if (Math.random() < 0.07) {
         this.pickups.spawn(e.x, e.y, 'health');
       }
     }
@@ -1004,13 +1109,27 @@ export class Game {
   }
 
   createDraft() {
-    return draftUpgrades(this.player, 3);
+    return draftUpgrades(this.player, 3, this.level);
+  }
+
+  rerollDraft() {
+    if (this.rerolls <= 0) return null;
+    this.rerolls--;
+    this.audio.ui();
+    return this.createDraft();
   }
 
   applyChosen(id) {
     const up = applyUpgrade(id, this.player, this);
     if (up) {
+      const nextCap = Math.max(0, Math.floor(this.player.stats.rerolls));
+      if (nextCap > this.rerollCap) {
+        this.rerolls += nextCap - this.rerollCap;
+        this.rerollCap = nextCap;
+      }
       this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
+      const activated = checkSynergies(this.player, this);
+      if (activated.length) this.onSynergy(activated);
     }
     if (this.pendingLevelUps <= 0) {
       this.pendingLevelUps = 0;
@@ -1037,7 +1156,15 @@ export class Game {
     this.finalized = true;
     const earned = Math.floor((this.score / 100 + this.level * 3) * this.save.currencyMultiplier());
     this.save.addCurrency(earned);
-    this.save.addScore(this.score, this.elapsed, this.level);
+    this.save.addScore({
+      score: this.score,
+      time: this.elapsed,
+      level: this.level,
+      kills: this.kills,
+      combo: this.comboBest,
+      doctrine: this.doctrine.id,
+      date: new Date().toISOString().slice(0, 10)
+    });
     return earned;
   }
 
@@ -1250,6 +1377,27 @@ export class Game {
       const e = this.enemies.enemies[i];
       if (e.dead) continue;
       shadow(e, e.r * 1.15);
+      if (e.elite) {
+        const x = e.px + (e.x - e.px) * alpha;
+        const y = e.py + (e.y - e.py) * alpha;
+        const aura = e.affix === 'armored' ? '#8be9ff' : e.affix === 'swift' ? '#ffc857' : '#ff8a66';
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.16 + Math.sin(e.age * 4.5) * 0.05;
+        ctx.fillStyle = aura;
+        ctx.beginPath();
+        ctx.arc(x, y, e.r * 1.8, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 0.62;
+        ctx.strokeStyle = aura;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 5]);
+        ctx.beginPath();
+        ctx.arc(x, y, e.r * 1.5, e.age * 1.4, e.age * 1.4 + TAU);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
     }
     for (let i = 0; i < this.pickups.size; i++) {
       const p = this.pickups.items[i];
@@ -1285,20 +1433,36 @@ export class Game {
   }
 
   _drawPickup(ctx, p) {
-    const pulse = 1 + Math.sin(p.age * 7) * 0.18;
+    const overcharge = p.type === 'overcharge';
+    const color = overcharge ? '#ffe066' : '#59ffa8';
+    const glow = overcharge ? 'rgba(255, 224, 102, 0.4)' : 'rgba(89, 255, 168, 0.35)';
+    const pulse = 1 + Math.sin(p.age * (overcharge ? 11 : 7)) * 0.18;
     const fade = p.life < 3 ? (Math.floor(p.life * 8) % 2 === 0 ? 0.35 : 1) : 1;
     ctx.save();
     ctx.translate(p.x, p.y);
+    ctx.rotate(p.age * (overcharge ? 2.4 : 0));
     ctx.globalAlpha = fade;
     ctx.globalCompositeOperation = 'lighter';
-    ctx.strokeStyle = 'rgba(89, 255, 168, 0.35)';
+    ctx.strokeStyle = glow;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, 16 * pulse, 0, TAU);
     ctx.stroke();
-    ctx.fillStyle = '#59ffa8';
-    ctx.fillRect(-2, -8, 4, 16);
-    ctx.fillRect(-8, -2, 16, 4);
+    ctx.fillStyle = color;
+    if (overcharge) {
+      ctx.beginPath();
+      ctx.moveTo(0, -9);
+      ctx.lineTo(6, -1);
+      ctx.lineTo(2, -1);
+      ctx.lineTo(4, 9);
+      ctx.lineTo(-6, 1);
+      ctx.lineTo(-2, 1);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      ctx.fillRect(-2, -8, 4, 16);
+      ctx.fillRect(-8, -2, 16, 4);
+    }
     ctx.restore();
     ctx.globalAlpha = 1;
   }

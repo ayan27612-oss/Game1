@@ -4,23 +4,18 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#04010a">
+<meta name="color-scheme" content="dark">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>PROTOCOL: SWARM</title>
+<meta name="apple-mobile-web-app-title" content="SWARM">
+<meta name="description" content="PROTOCOL: SWARM — a neon twin-stick roguelite. Draft protocols, stack synergies, and break the swarm.">
+<title>PROTOCOL: SWARM // 2.0</title>
 <link rel="manifest" href="manifest.json">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="stylesheet" href="style.css">
-<script type="importmap">
-{
-  "imports": {
-    "./engine/": "./",
-    "./entities/": "./",
-    "./systems/": "./",
-    "../engine/": "./",
-    "../systems/": "./"
-  }
-}
-</script>
 </head>
 <body>
 <div id="app">
@@ -34,20 +29,32 @@
       <div class="hud-row">
         <span class="lvl" id="hud-level">LV 1</span>
         <span class="hud-name" id="hud-name">OPERATOR // NOVA</span>
+        <span class="doctrine-chip" id="hud-doctrine">VANGUARD</span>
       </div>
-      <div class="bar hp"><div id="hp-fill"></div><span id="hp-text">100 / 100</span></div>
-      <div class="bar xp"><div id="xp-fill"></div><span id="xp-text">XP 0 / 10</span></div>
+      <div class="bar hp" role="progressbar" aria-label="Hull integrity"><div id="hp-fill"></div><span id="hp-text">100 / 100</span></div>
+      <div class="bar xp" role="progressbar" aria-label="Experience"><div id="xp-fill"></div><span id="xp-text">XP 0 / 10</span></div>
+    </div>
+
+    <div class="hud-center-top">
+      <div id="combo-chip" class="combo-chip hidden">
+        <b id="combo-value">1.0x</b>
+        <span id="combo-count">0 CHAIN</span>
+      </div>
+      <div id="threat-chip" class="threat-chip">THREAT <b id="hud-threat">1</b></div>
     </div>
 
     <div class="hud-corner tr glass">
-      <div class="stat"><label>SCORE</label><b id="hud-score">0</b></div>
-      <div class="stat"><label>TIME</label><b id="hud-time">00:00</b></div>
-      <div class="stat"><label>KILLS</label><b id="hud-kills">0</b></div>
+      <div class="stat-grid">
+        <div class="stat"><label>SCORE</label><b id="hud-score">0</b></div>
+        <div class="stat"><label>TIME</label><b id="hud-time">00:00</b></div>
+        <div class="stat"><label>KILLS</label><b id="hud-kills">0</b></div>
+        <div class="stat"><label>ELITES</label><b id="hud-elites">0</b></div>
+      </div>
       <div class="hud-buttons">
-        <button id="btn-full" class="icon-btn" title="Fullscreen + landscape lock">FS</button>
-        <button id="btn-scan" class="icon-btn" title="CRT scanlines (T)">CRT</button>
-        <button id="btn-mute" class="icon-btn" title="Mute audio (M)">SND</button>
-        <button id="btn-pause" class="icon-btn" title="Pause (P / ESC)">II</button>
+        <button id="btn-full" class="icon-btn" title="Fullscreen + landscape lock" aria-label="Fullscreen">FS</button>
+        <button id="btn-scan" class="icon-btn" title="CRT scanlines (T)" aria-label="Toggle scanlines">CRT</button>
+        <button id="btn-mute" class="icon-btn" title="Mute audio (M)" aria-label="Toggle audio">SND</button>
+        <button id="btn-pause" class="icon-btn" title="Pause (P / ESC)" aria-label="Pause">II</button>
       </div>
     </div>
 
@@ -67,121 +74,349 @@
     <div class="bar boss"><div id="boss-fill"></div></div>
   </div>
 
-  <div id="menu" class="overlay">
-    <div class="menu-inner glass">
-      <div class="brand">
-        <div class="brand-tag">NEON ARENA // ROGUELITE PROTOCOL</div>
-        <h1>PROTOCOL<span>:</span>SWARM</h1>
-        <p class="tagline">Survive the grid. Draft the protocol. Break the swarm.</p>
+  <div id="boss-intro" class="boss-intro hidden" aria-live="polite">
+    <span>SECTOR GUARDIAN DETECTED</span>
+    <h2 id="boss-intro-name">THE ARCHITECT</h2>
+    <p id="boss-intro-sub">BREAK THE CORE // SURVIVE THE RESPONSE</p>
+  </div>
+
+  <div id="synergy-banner" class="synergy-banner hidden" aria-live="polite">
+    <span>SYNERGY ONLINE</span>
+    <b id="synergy-name">KINETIC ARRAY</b>
+    <i id="synergy-desc">+12% weapon damage</i>
+  </div>
+
+  <div id="menu" class="overlay menu-overlay">
+    <div class="menu-shell glass">
+      <header class="menu-header">
+        <div class="brand">
+          <div class="brand-tag">NEON ARENA // ROGUELITE PROTOCOL</div>
+          <h1>PROTOCOL<span>:</span>SWARM <em>2.0</em></h1>
+          <p class="tagline">Survive the grid. Draft the protocol. Break the swarm.</p>
+        </div>
+        <div class="header-right">
+          <div class="currency-pill" id="menu-currency-pill"><span>CREDIT BALANCE</span><b id="menu-currency">0 CR</b></div>
+          <div class="version-tag">BUILD 2.0.0 // OFFLINE READY</div>
+        </div>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="Command deck">
+        <button id="tab-deploy" class="tab active" data-tab="deploy" role="tab" aria-selected="true" aria-controls="panel-deploy">DEPLOY</button>
+        <button id="tab-hangar" class="tab" data-tab="hangar" role="tab" aria-selected="false" aria-controls="panel-hangar">HANGAR</button>
+        <button id="tab-meta" class="tab" data-tab="meta" role="tab" aria-selected="false" aria-controls="panel-meta">META LAB</button>
+        <button id="tab-archive" class="tab" data-tab="archive" role="tab" aria-selected="false" aria-controls="panel-archive">ARCHIVE</button>
+        <button id="tab-settings" class="tab" data-tab="settings" role="tab" aria-selected="false" aria-controls="panel-settings">SETTINGS</button>
+      </nav>
+
+      <div class="tab-panels">
+        <section id="panel-deploy" class="tab-panel active" role="tabpanel" aria-labelledby="tab-deploy">
+          <div class="deploy-grid">
+            <div class="deploy-main">
+              <div class="panel-intro">
+                <div>
+                  <h2>MISSION CONTROL</h2>
+                  <p>Select a doctrine, then initialize the run. Each doctrine injects a different opening build — draft synergies to escalate.</p>
+                </div>
+                <div class="best-run">
+                  <span>PERSONAL BEST</span>
+                  <b id="menu-best">0</b>
+                </div>
+              </div>
+
+              <h3 class="section-title">STARTING DOCTRINE <span id="doctrine-hint">CHOOSE YOUR OPENING FRAME</span></h3>
+              <div id="doctrine-list" class="doctrine-list"></div>
+
+              <div class="deploy-actions">
+                <button id="btn-start" class="btn btn-primary btn-xl">INITIALIZE RUN</button>
+                <button id="btn-briefing" class="btn btn-ghost">MISSION BRIEFING</button>
+                <button id="btn-fullscreen" class="btn btn-ghost">FULLSCREEN</button>
+              </div>
+
+              <div class="controls glass-inset">
+                <h3>FIELD CONTROLS <span>KEYBOARD + TOUCH + GAMEPAD</span></h3>
+                <div class="control-grid">
+                  <div><b>WASD / L-STICK</b><span>Move with inertia</span></div>
+                  <div><b>MOUSE / R-STICK</b><span>Aim · hold to fire</span></div>
+                  <div><b>SPACE / DASH</b><span>Directional dash + i-frames</span></div>
+                  <div><b>Q E R C</b><span>Nova · Aegis · Overdrive · Time Warp</span></div>
+                  <div><b>P / ESC</b><span>Pause · <b>T</b> scanlines · <b>M</b> mute</span></div>
+                  <div><b>F / `</b><span>Telemetry · quadtree debug</span></div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="deploy-side">
+              <div class="panel run-intel">
+                <h3>RUN INTEL</h3>
+                <div class="intel-row"><span>WIN CONDITION</span><b>SURVIVE · SCORE</b></div>
+                <div class="intel-row"><span>BOSS CADENCE</span><b>EVERY 105s</b></div>
+                <div class="intel-row"><span>THREAT ESCALATION</span><b>EVERY 45s</b></div>
+                <div class="intel-row"><span>SYNERGY TIERS</span><b>4 · 8 · 12</b></div>
+                <p class="intel-note">Elites spawn after 40 seconds. Their affixes change the fight — armored, volatile, or swift.</p>
+              </div>
+              <div class="panel synergy-primer">
+                <h3>SYNERGY MATRIX <span class="currency">4 / 8 / 12</span></h3>
+                <div class="syn-tag-list">
+                  <div class="syn-tag" style="--tg:#ff8a66"><b>BALLISTIC</b><span>Damage · pierce</span></div>
+                  <div class="syn-tag" style="--tg:#46f4ff"><b>PHASE</b><span>Dash · mobility</span></div>
+                  <div class="syn-tag" style="--tg:#b06bff"><b>TECH</b><span>Abilities · arcs</span></div>
+                  <div class="syn-tag" style="--tg:#59ffa8"><b>BIO</b><span>Hull · regen</span></div>
+                  <div class="syn-tag" style="--tg:#ffc857"><b>COMMAND</b><span>XP · wingman</span></div>
+                </div>
+                <p class="intel-note">Module tags stack across drafts. Reach a threshold to auto-install a protocol bonus.</p>
+              </div>
+              <div class="panel">
+                <h3>HIGH SCORES <span id="menu-runs" class="currency">0 RUNS</span></h3>
+                <ol id="menu-scores" class="score-list"></ol>
+              </div>
+              <div class="panel objective-panel">
+                <h3>DIRECTIVE</h3>
+                <p>Clear hostiles, chain kills for a score multiplier, draft protocol upgrades, and stack tagged synergies. Abort or fall — salvage converts to credits.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="panel-hangar" class="tab-panel" role="tabpanel" aria-labelledby="tab-hangar">
+          <div class="hangar-grid">
+            <div class="panel hangar-panel">
+              <h3>HANGAR <span id="hangar-callsign" class="currency">INTERCEPTOR</span></h3>
+              <canvas id="hangar-preview" width="420" height="220" aria-label="Ship preview"></canvas>
+              <div class="hangar-row">
+                <span>HULL</span>
+                <button type="button" class="hangar-btn" data-part="style" data-dir="-1" aria-label="Previous hull">&#8249;</button>
+                <b id="hangar-style">INTERCEPTOR</b>
+                <button type="button" class="hangar-btn" data-part="style" data-dir="1" aria-label="Next hull">&#8250;</button>
+              </div>
+              <div class="hangar-row">
+                <span>PAINT</span>
+                <button type="button" class="hangar-btn" data-part="palette" data-dir="-1" aria-label="Previous paint">&#8249;</button>
+                <b id="hangar-palette">NOVA</b>
+                <button type="button" class="hangar-btn" data-part="palette" data-dir="1" aria-label="Next paint">&#8250;</button>
+              </div>
+              <div class="hangar-row">
+                <span>WINGMAN</span>
+                <button type="button" class="hangar-btn" data-part="ally" data-dir="-1" aria-label="Previous wingman paint">&#8249;</button>
+                <b id="hangar-ally">MINT</b>
+                <button type="button" class="hangar-btn" data-part="ally" data-dir="1" aria-label="Next wingman paint">&#8250;</button>
+              </div>
+              <div class="callsign-row">
+                <label for="callsign-input">CALLSIGN</label>
+                <input id="callsign-input" maxlength="12" autocomplete="off" spellcheck="false" value="NOVA">
+                <button id="btn-save-callsign" class="btn btn-small" type="button">SAVE</button>
+              </div>
+            </div>
+            <aside class="panel">
+              <h3>LOADOUT NOTES</h3>
+              <p class="muted">Cosmetics persist between runs. Callsigns accept A-Z, 0-9, dash, and underscore.</p>
+              <div class="intel-row"><span>DEFAULT HULL</span><b>INTERCEPTOR</b></div>
+              <div class="intel-row"><span>WINGMAN AI</span><b>ESCORT</b></div>
+              <div class="intel-row"><span>META COUPLING</span><b>PERMANENT</b></div>
+              <div class="panel-callout">Hull, paint, and wingman choices are visual only. Doctrine and meta unlocks affect performance.</div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="panel-meta" class="tab-panel" role="tabpanel" aria-labelledby="tab-meta">
+          <div class="meta-grid">
+            <div class="panel">
+              <h3>META LAB <span class="currency" id="meta-balance">0 CR</span></h3>
+              <p class="muted">Permanent upgrades bought with salvage. Each unlock applies to every future run.</p>
+              <div id="meta-shop" class="meta-shop"></div>
+            </div>
+            <aside class="panel">
+              <h3>CAREER RECORD</h3>
+              <div class="career-grid" id="career-stats"></div>
+              <p class="muted">Salvage formula: score / 100 + level × 3, multiplied by Salvage Protocol when owned.</p>
+            </aside>
+          </div>
+        </section>
+
+        <section id="panel-archive" class="tab-panel" role="tabpanel" aria-labelledby="tab-archive">
+          <div class="archive-grid">
+            <div class="panel">
+              <h3>RUN ARCHIVE</h3>
+              <ol id="archive-scores" class="score-list archive-list"></ol>
+            </div>
+            <aside class="panel">
+              <h3>FIELD RECORD</h3>
+              <div class="career-grid" id="archive-career"></div>
+              <div class="panel-callout">Scores are stored locally. Clearing browser data removes your archive and credits.</div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings">
+          <div class="settings-grid">
+            <div class="panel">
+              <h3>AUDIO</h3>
+              <label class="setting-row" for="set-music"><span>Music volume</span><b id="set-music-value">70%</b></label>
+              <input id="set-music" type="range" min="0" max="100" step="5" value="70">
+              <label class="setting-row" for="set-sfx"><span>Effects volume</span><b id="set-sfx-value">90%</b></label>
+              <input id="set-sfx" type="range" min="0" max="100" step="5" value="90">
+              <label class="toggle-row"><span>Mute all audio</span><input id="set-muted" type="checkbox"><i></i></label>
+              <h3 class="settings-sub">VISUALS</h3>
+              <label class="toggle-row"><span>Screen shake</span><input id="set-shake" type="checkbox" checked><i></i></label>
+              <label class="toggle-row"><span>Damage numbers</span><input id="set-numbers" type="checkbox" checked><i></i></label>
+              <label class="toggle-row"><span>Reduced motion</span><input id="set-motion" type="checkbox"><i></i></label>
+              <label class="toggle-row"><span>CRT scanlines</span><input id="set-scanlines" type="checkbox" checked><i></i></label>
+            </div>
+            <aside class="panel">
+              <h3>PERFORMANCE</h3>
+              <label class="setting-row" for="set-quality"><span>Render quality</span></label>
+              <select id="set-quality">
+                <option value="auto">Auto (adaptive)</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+              <p class="muted">Auto lowers internal resolution when frame rate drops and restores it when stable.</p>
+              <h3 class="settings-sub">DATA</h3>
+              <div class="intel-row"><span>SAVE FORMAT</span><b>SCHEMA v3</b></div>
+              <div class="intel-row"><span>STORAGE</span><b>LOCAL ONLY</b></div>
+              <button id="btn-reset-save" class="btn btn-danger btn-full-width" type="button">RESET ALL PROGRESS</button>
+              <p class="muted small">Hold to confirm is not enabled — clicking asks once. This cannot be undone.</p>
+            </aside>
+          </div>
+        </section>
       </div>
 
-      <div class="menu-grid">
-        <div class="menu-main">
-          <div class="menu-actions">
-            <button id="btn-start" class="btn btn-primary">INITIALIZE RUN</button>
-            <button id="btn-fullscreen" class="btn btn-lock">FULLSCREEN + LANDSCAPE</button>
-          </div>
-          <div class="controls glass-inset">
-            <h3>CONTROLS</h3>
-            <ul>
-              <li class="kbd-only"><b>WASD</b><span>Move with inertia</span></li>
-              <li class="touch-only"><b>LEFT STICK</b><span>Move with inertia</span></li>
-              <li class="kbd-only"><b>MOUSE</b><span>Aim turret / hold to fire</span></li>
-              <li class="touch-only"><b>RIGHT STICK</b><span>Aim · hold to fire</span></li>
-              <li class="kbd-only"><b>SPACE</b><span>Directional dash + i-frames</span></li>
-              <li class="touch-only"><b>DASH</b><span>Tap the DASH button</span></li>
-              <li><b>Q / E / R / C</b><span>Nova · Aegis · Overdrive · Time Warp</span></li>
-              <li><b>GAMEPAD</b><span>L-stick move · R-stick aim · RT fire · A dash · Start pause</span></li>
-              <li><b>GAMEPAD</b><span>X Nova · Y Aegis · B Overdrive · LB Time Warp</span></li>
-              <li class="kbd-only"><b>F</b><span>Telemetry · <b>`</b> quadtree debug</span></li>
-              <li class="kbd-only"><b>P / ESC</b><span>Pause · <b>T</b> scanlines · <b>M</b> mute</span></li>
-              <li class="touch-only"><b>II</b><span>Pause from the HUD</span></li>
-            </ul>
-          </div>
-
-          <div class="panel hangar">
-            <h3>HANGAR <span id="hangar-callsign" class="currency">INTERCEPTOR</span></h3>
-            <canvas id="hangar-preview" width="300" height="150" aria-label="Ship preview"></canvas>
-            <div class="hangar-row">
-              <span>HULL</span>
-              <button type="button" class="hangar-btn" data-part="style" data-dir="-1" aria-label="Previous hull">&#8249;</button>
-              <b id="hangar-style">INTERCEPTOR</b>
-              <button type="button" class="hangar-btn" data-part="style" data-dir="1" aria-label="Next hull">&#8250;</button>
-            </div>
-            <div class="hangar-row">
-              <span>PAINT</span>
-              <button type="button" class="hangar-btn" data-part="palette" data-dir="-1" aria-label="Previous paint">&#8249;</button>
-              <b id="hangar-palette">NOVA</b>
-              <button type="button" class="hangar-btn" data-part="palette" data-dir="1" aria-label="Next paint">&#8250;</button>
-            </div>
-            <div class="hangar-row">
-              <span>WINGMAN</span>
-              <button type="button" class="hangar-btn" data-part="ally" data-dir="-1" aria-label="Previous wingman paint">&#8249;</button>
-              <b id="hangar-ally">MINT</b>
-              <button type="button" class="hangar-btn" data-part="ally" data-dir="1" aria-label="Next wingman paint">&#8250;</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="menu-side">
-          <div class="panel">
-            <h3>HIGH SCORES</h3>
-            <ol id="menu-scores" class="score-list"></ol>
-          </div>
-          <div class="panel">
-            <h3>META LAB <span id="menu-currency" class="currency">0 CR</span></h3>
-            <div id="meta-shop" class="meta-shop"></div>
-          </div>
-        </div>
-      </div>
+      <footer class="menu-footer">
+        <span>PROTOCOL: SWARM 2.0</span>
+        <span>VANILLA ES MODULES · CANVAS · WEBAUDIO · ZERO DEPENDENCIES</span>
+      </footer>
     </div>
   </div>
 
   <div id="draft" class="overlay hidden">
-    <div class="draft-inner">
+    <div class="draft-inner" role="dialog" aria-modal="true" aria-labelledby="draft-title">
       <div class="draft-head">
-        <div class="brand-tag">PROTOCOL AUGMENTATION</div>
-        <h2>LEVEL <span id="draft-level">2</span></h2>
-        <p>Select one synergy module</p>
+        <div>
+          <div class="brand-tag">PROTOCOL AUGMENTATION</div>
+          <h2 id="draft-title">LEVEL <span id="draft-level">2</span></h2>
+          <p>Select one module. Stack tags to unlock synergies at 4 / 8 / 12.</p>
+        </div>
+        <div class="draft-meta">
+          <div class="reroll-chip">REROLLS <b id="draft-rerolls">2</b></div>
+          <button id="btn-reroll" class="btn btn-small" type="button">REROLL <span id="draft-reroll-key">[4]</span></button>
+        </div>
       </div>
       <div id="draft-cards" class="draft-cards"></div>
-      <div class="draft-hint">PRESS 1 / 2 / 3 OR CLICK A CARD</div>
+      <div class="draft-hint">PRESS 1 / 2 / 3 TO SELECT · 4 TO REROLL</div>
     </div>
   </div>
 
   <div id="pause" class="overlay hidden">
-    <div class="modal glass">
-      <div class="brand-tag">SIMULATION SUSPENDED</div>
-      <h2>PAUSED</h2>
-      <p>Delta accumulator flushed. Resume when ready.</p>
+    <div class="modal glass pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+      <div class="modal-head">
+        <div>
+          <div class="brand-tag">SIMULATION SUSPENDED</div>
+          <h2 id="pause-title">PAUSED</h2>
+        </div>
+        <div class="pause-actions-top">
+          <button id="btn-pause-mute" class="icon-btn" type="button" title="Mute">SND</button>
+          <button id="btn-pause-scan" class="icon-btn" type="button" title="Scanlines">CRT</button>
+        </div>
+      </div>
+      <div class="pause-stats" id="pause-stats"></div>
+      <div class="pause-columns">
+        <div>
+          <h3>ACTIVE BUILD</h3>
+          <div id="pause-build" class="build-list"></div>
+        </div>
+        <div>
+          <h3>SYNERGY MATRIX</h3>
+          <div id="pause-synergies" class="synergy-list"></div>
+        </div>
+      </div>
       <div class="modal-buttons">
         <button id="btn-resume" class="btn btn-primary">RESUME</button>
-        <button id="btn-quit" class="btn">ABORT RUN</button>
+        <button id="btn-quit" class="btn">ABORT TO MENU</button>
       </div>
     </div>
   </div>
 
   <div id="gameover" class="overlay hidden">
-    <div class="modal glass gameover">
-      <div class="brand-tag">RUN TERMINATED</div>
-      <h2>SWARM WINS</h2>
-      <div class="go-stats">
-        <div><label>SCORE</label><b id="go-score">0</b></div>
+    <div class="modal glass gameover" role="dialog" aria-modal="true" aria-labelledby="gameover-title">
+      <div class="modal-head">
+        <div>
+          <div class="brand-tag">RUN TERMINATED</div>
+          <h2 id="gameover-title">SWARM WINS</h2>
+        </div>
+        <div id="go-record" class="record-badge hidden">NEW RECORD</div>
+      </div>
+      <div class="go-hero">
+        <div><label>FINAL SCORE</label><b id="go-score">0</b></div>
+        <div class="go-meta" id="go-meta">+0 CR SALVAGED</div>
+      </div>
+      <div class="go-stats" id="go-stats">
         <div><label>SURVIVED</label><b id="go-time">00:00</b></div>
         <div><label>LEVEL</label><b id="go-level">1</b></div>
         <div><label>KILLS</label><b id="go-kills">0</b></div>
+        <div><label>BEST COMBO</label><b id="go-combo">0</b></div>
+        <div><label>DAMAGE DEALT</label><b id="go-dealt">0</b></div>
+        <div><label>DAMAGE TAKEN</label><b id="go-taken">0</b></div>
+        <div><label>ELITES / BOSSES</label><b id="go-elites">0 / 0</b></div>
+        <div><label>DOCTRINE</label><b id="go-doctrine">VANGUARD</b></div>
       </div>
-      <div id="go-meta" class="go-meta">+0 CR SALVAGED</div>
+      <div class="go-build" id="go-build"></div>
       <div class="modal-buttons">
         <button id="btn-retry" class="btn btn-primary">RE-INITIALIZE</button>
-        <button id="btn-menu" class="btn">MAIN MENU</button>
+        <button id="btn-menu" class="btn">COMMAND DECK</button>
       </div>
     </div>
   </div>
 
-  <div id="toast" class="toast"></div>
+  <div id="briefing" class="overlay hidden">
+    <div class="modal glass briefing-modal" role="dialog" aria-modal="true" aria-labelledby="briefing-title">
+      <div class="modal-head">
+        <div>
+          <div class="brand-tag">MISSION BRIEFING // FIRST CONTACT</div>
+          <h2 id="briefing-title">SURVIVE THE GRID</h2>
+        </div>
+        <button id="btn-briefing-close" class="icon-btn" type="button" aria-label="Close briefing">X</button>
+      </div>
+      <div class="briefing-grid">
+        <section>
+          <h3>OBJECTIVE</h3>
+          <p>Outlast the swarm, chain kills for a score multiplier, and push threat levels. Bosses arrive every 105 seconds. There is no extraction — only a higher score.</p>
+          <ul class="briefing-list">
+            <li><b>CHAIN</b> — kills refresh the combo timer. Higher combo means more score.</li>
+            <li><b>DRAFT</b> — every level offers three protocol modules. Reroll twice per run.</li>
+            <li><b>SYNERGY</b> — module tags stack. Hit 4 / 8 / 12 for automatic bonuses.</li>
+          </ul>
+        </section>
+        <section>
+          <h3>CONTROLS</h3>
+          <ul class="briefing-list">
+            <li><b>MOVE</b> — WASD, left stick, or touch left half.</li>
+            <li><b>AIM + FIRE</b> — mouse, right stick, or touch right half.</li>
+            <li><b>DASH</b> — Space, gamepad A, or the DASH button.</li>
+            <li><b>ABILITIES</b> — Q / E / R / C or touch buttons.</li>
+            <li><b>PAUSE</b> — P / ESC or Start.</li>
+          </ul>
+        </section>
+        <section>
+          <h3>DOCTRINES</h3>
+          <ul class="briefing-list">
+            <li><b>VANGUARD</b> — forgiving all-rounder.</li>
+            <li><b>LANCER</b> — glass-cannon burst.</li>
+            <li><b>WARDEN</b> — armored siege platform.</li>
+            <li><b>PHANTOM</b> — evasion prototype; unlock in Meta Lab.</li>
+          </ul>
+          <div class="panel-callout">Tip: heat builds while firing. Feather the trigger or draft cooling modules.</div>
+        </section>
+      </div>
+      <div class="modal-buttons">
+        <button id="btn-briefing-start" class="btn btn-primary">DEPLOY</button>
+        <button id="btn-briefing-dismiss" class="btn">BACK TO DECK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </div>
 
-<script type="module" src="main.js"></script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>
