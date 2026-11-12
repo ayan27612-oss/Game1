@@ -1,6 +1,6 @@
 # Deployment guide
 
-PROTOCOL: SWARM is a static site. There is no build command, server-side
+PROTOCOL: WARFORGE is a static site. There is no build command, server-side
 runtime, environment variable, or secret. Deploy the repository contents as-is.
 
 ## Hosts
@@ -68,17 +68,30 @@ require HTTPS except on `localhost`.
    ```
 
 7. Manually smoke-test:
-   - first load and briefing
-   - start run, draft, reroll, pause, death, retry
+   - first load and briefing, including lens flare and title render
+   - command deck: armor-mark select, armory loadout, fabricator purchase
+   - start run, weapon swap (all five weapons), missile barrage, dash, pause,
+     death, retry
+   - War Machine companion fires autonomously
+   - landscape lock and fullscreen request on a mobile device
    - settings persistence after reload
    - service worker update and offline reload
 8. Deploy.
+
+## Save schema
+
+The current save schema is **v4** (`SAVE_VERSION = 4`), stored under
+`protocol_warforge_save_v3`. Legacy `protocol_swarm_save_v2`/`_v1` payloads are
+migrated on load, including the old doctrine IDs to armor marks
+(`vanguard→mark3`, `lancer→mark42`, `warden→hulkbuster`,
+`phantom→bleeding_edge`). Never remove a migration step without a major version
+bump; a returning player's save must always load.
 
 ## Verifying the service worker
 
 In DevTools → Application → Service Workers, confirm the worker is activated and
 controls the page. In Cache Storage, confirm a cache named
-`protocol-swarm-v<version>` exists.
+`protocol-warforge-v<version>` exists.
 
 To test offline:
 
@@ -114,6 +127,8 @@ included Node server does this by default.
 | Blank page from `file://` | ES modules and service worker require HTTP | Serve over localhost or HTTPS |
 | Old build after deploy | `sw.js` version or CDN cache not updated | Bump `VERSION`, hard reload, purge CDN |
 | Touch controls missing | Device reports a fine pointer | Use a touch device or emulate touch in DevTools |
+| Game renders in portrait | Fullscreen/orientation lock was declined or unsupported | Rotate the device; the stage stays letterboxed at 16:9 either way |
+| Letterboxed with black bars | Stage aspect differs from 16:9 | Expected: the fixed stage is capped at 1600×900 |
 | No gamepad input | Gamepad polling disabled in automation/headless | Use a normal browser; remove `?nogamepad` |
 | Progress reset | Browser storage cleared or different origin | Use the same origin/domain; avoid private mode |
 | Audio silent | Autoplay policy before first gesture | Click/tap once; check mute and volume settings |

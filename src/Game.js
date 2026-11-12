@@ -14,14 +14,9 @@ import { Player } from './entities/Player.js';
 import { Ally } from './entities/Ally.js';
 import { EnemyManager } from './entities/Enemies.js';
 import { ParticleSystem } from './systems/Particles.js';
-import { SHIP_STYLES, SHIP_PALETTES, ALLY_PALETTES } from './systems/Customization.js';
-import {
-  draftUpgrades,
-  applyUpgrade,
-  META_UNLOCKS
-} from './systems/Upgrades.js';
-import { getDoctrine, isDoctrineUnlocked } from './systems/Doctrines.js';
-import { checkSynergies } from './systems/Synergies.js';
+import { ARMOR_FRAMES, SHIP_PALETTES, ALLY_PALETTES } from './systems/Customization.js';
+import { META_UNLOCKS } from './systems/Upgrades.js';
+import { getArmorMark, isArmorMarkUnlocked } from './systems/Doctrines.js';
 
 class BulletPool {
   constructor(size) {
@@ -49,7 +44,10 @@ class BulletPool {
         homing: 0,
         color: '#ffffff',
         size: 3,
-        hits: new Int32Array(8),
+        kind: 'bolt',
+        splash: 0,
+        crit: false,
+        hits: new Int32Array(16),
         hitCount: 0
       };
       this.free[i] = size - 1 - i;
@@ -57,7 +55,7 @@ class BulletPool {
     this.active = 0;
   }
 
-  spawn(x, y, vx, vy, r, damage, life, pierce, ricochet, chain, color, size, enemy = false, homing = 0) {
+  spawn(x, y, vx, vy, r, damage, life, pierce, ricochet, chain, color, size, enemy = false, homing = 0, kind = 'bolt', splash = 0, crit = false) {
     if (this.free.length === 0) return null;
     const b = this.items[this.free.pop()];
     b.active = true;
@@ -78,6 +76,9 @@ class BulletPool {
     b.homing = homing;
     b.color = color;
     b.size = size;
+    b.kind = kind;
+    b.splash = splash;
+    b.crit = crit;
     b.hitCount = 0;
     this.active++;
     return b;
@@ -173,12 +174,12 @@ class PickupPool {
       p.y += p.vy * dt;
       p.x = clamp(p.x, 20, game.world.w - 20);
       p.y = clamp(p.y, 20, game.world.h - 20);
-      if (d < player.r + 14) {
+      if (d < player.r + 15) {
         if (p.type === 'health') {
-          player.heal(22, game);
+          player.heal(26, game);
         } else if (p.type === 'overcharge') {
           player.buffs.overcharge = Math.max(player.buffs.overcharge, 8);
-          player.heat = Math.max(0, player.heat - 0.2);
+          player.heat = Math.max(0, player.heat - 0.22);
           game.particles.ring(player.x, player.y, '#ffe066', 18, 320, 0.5, 3);
           game.particles.sparkBurst(player.x, player.y, 16, '#fff3b0', 300, 2.6, 0.5);
           if (game.settings?.damageNumbers !== false) {
@@ -217,58 +218,44 @@ class PickupPool {
   }
 }
 
-function makeSingularity() {
-  return {
-    active: false,
-    x: 0,
-    y: 0,
-    life: 0,
-    maxLife: 1,
-    radius: 170,
-    damage: 40,
-    angle: 0
-  };
-}
-
 export class Game {
   constructor(opts) {
     this.view = opts.view;
     this.input = opts.input;
     this.audio = opts.audio;
     this.save = opts.save;
-    this.onLevelUp = opts.onLevelUp || (() => {});
     this.onGameOver = opts.onGameOver || (() => {});
-    this.onSynergy = opts.onSynergy || (() => {});
     this.onThreat = opts.onThreat || (() => {});
     this.onBoss = opts.onBoss || (() => {});
     this.settings = opts.settings || {};
-    this.doctrine = getDoctrine(opts.doctrine || this.save.doctrine || 'vanguard');
-    if (!isDoctrineUnlocked(this.doctrine, this.save)) this.doctrine = getDoctrine('vanguard');
+
+    this.mark = getArmorMark(opts.mark || this.save.mark || 'mark3');
+    if (!isArmorMarkUnlocked(this.mark, this.save)) this.mark = getArmorMark('mark3');
 
     this.world = { w: 4200, h: 3200 };
     this.tilt = CAM_TILT;
     this.zoom = CAMERA_ZOOM;
-    const shipCfg = this.save.getShipConfig ? this.save.getShipConfig() : { style: 0, palette: 0, ally: 0 };
+    const shipCfg = this.save.getShipConfig ? this.save.getShipConfig() : { frame: 0, palette: 0, ally: 0 };
     this.shipCfg = shipCfg;
-    const shipStyle = ((shipCfg.style % SHIP_STYLES.length) + SHIP_STYLES.length) % SHIP_STYLES.length;
+    const frame = ((shipCfg.frame % ARMOR_FRAMES.length) + ARMOR_FRAMES.length) % ARMOR_FRAMES.length;
     const playerPal = SHIP_PALETTES[shipCfg.palette % SHIP_PALETTES.length] || SHIP_PALETTES[0];
     this.player = new Player(this.world.w * 0.5, this.world.h * 0.5, {
-      style: shipStyle,
+      frame,
       colors: playerPal,
-      callsign: shipCfg.callsign || playerPal.name
+      callsign: shipCfg.callsign || 'TONY'
     });
     this.ally = new Ally(this.player.x - 70, this.player.y, {
-      style: (shipStyle + 1) % SHIP_STYLES.length,
+      frame: (frame + 1) % ARMOR_FRAMES.length,
       colors: ALLY_PALETTES[shipCfg.ally % ALLY_PALETTES.length] || ALLY_PALETTES[0],
-      name: 'WINGMAN'
+      name: 'WAR MACHINE'
     });
     this.enemies = new EnemyManager();
     this.particles = new ParticleSystem();
     this.quadtree = new Quadtree(0, 0, this.world.w, this.world.h, 8, 0, 6);
     this.quadtreeNodes = 1;
     this.quadtreeQueries = 0;
-    this.bullets = new BulletPool(820);
-    this.enemyBullets = new BulletPool(540);
+    this.bullets = new BulletPool(900);
+    this.enemyBullets = new BulletPool(560);
     this.pickups = new PickupPool(40);
 
     this.candA = [];
@@ -276,9 +263,6 @@ export class Game {
     this.candC = [];
     this.candH = [];
     this.chainHits = [];
-
-    this.singularities = new Array(8);
-    for (let i = 0; i < this.singularities.length; i++) this.singularities[i] = makeSingularity();
 
     this.camera = {
       x: this.player.x,
@@ -291,11 +275,6 @@ export class Game {
     this.elapsed = 0;
     this.score = 0;
     this.kills = 0;
-    this.level = 1;
-    this.xp = 0;
-    this.xpNext = 8;
-    this.pendingLevelUps = 0;
-    this.draftOpen = false;
     this.over = false;
     this.finalized = false;
     this.debugQuadtree = false;
@@ -311,7 +290,6 @@ export class Game {
     this.elitesKilled = 0;
     this.bossKills = 0;
     this.revivesUsed = 0;
-    this.rerolls = 2;
 
     this.swarmTimer = 1.6;
     this.sniperTimer = 8;
@@ -322,7 +300,6 @@ export class Game {
     this.gunnerTimer = 21;
     this.nextBoss = 105;
     this.bossCount = 0;
-    this.bladeAngle = 0;
 
     this.stars = [];
     for (let i = 0; i < 220; i++) {
@@ -343,7 +320,7 @@ export class Game {
         a: rand(0.15, 0.75),
         d: rand(0.05, 0.35),
         tw: rand(0.6, 2.4),
-        hue: Math.random() < 0.18 ? '#ffd7f2' : Math.random() < 0.3 ? '#d9c8ff' : '#bfefff'
+        hue: Math.random() < 0.18 ? '#ffd7c2' : Math.random() < 0.3 ? '#ffe6a8' : '#cfe8ff'
       });
     }
     this.renderScale = 1;
@@ -352,12 +329,11 @@ export class Game {
       const meta = META_UNLOCKS.find((m) => m.id === this.save.unlocks[i]);
       if (meta) meta.apply(this.player);
     }
-    this.doctrine.apply(this.player);
-    this.player.stats.maxHp = Math.max(40, this.player.stats.maxHp);
+    this.mark.apply(this.player);
+    this.player.stats.maxHp = Math.max(60, Math.round(this.player.stats.maxHp));
     this.player.hp = this.player.stats.maxHp;
     this.player.dashCharges = this.player.stats.maxDashCharges;
-    this.rerollCap = Math.max(0, Math.floor(this.player.stats.rerolls));
-    this.rerolls = this.rerollCap;
+    this.player.missileCooldown = 1.4;
 
     this.particles.shakeScale = this.settings.screenShake === false ? 0 : 1;
     this.particles.fxScale = this.settings.reducedMotion ? 0.25 : 1;
@@ -379,11 +355,9 @@ export class Game {
 
   updateCamera(dt) {
     const p = this.player;
-    const targetX = p.x;
-    const targetY = p.y;
     const k = 1 - Math.exp(-7 * dt);
-    this.camera.x += (targetX - this.camera.x) * k;
-    this.camera.y += (targetY - this.camera.y) * k;
+    this.camera.x += (p.x - this.camera.x) * k;
+    this.camera.y += (p.y - this.camera.y) * k;
     this._clampCamera();
   }
 
@@ -429,13 +403,6 @@ export class Game {
     ctx.setTransform(s, 0, 0, s, (px - wx * zoom) * dpr, (py - wy * zoom) * dpr);
   }
 
-  _actorPos(ref, alpha) {
-    return {
-      x: ref.px + (ref.x - ref.px) * alpha,
-      y: ref.py + (ref.y - ref.py) * alpha
-    };
-  }
-
   findNearestEnemy(x, y, maxDist = 640) {
     const list = this.enemies.enemies;
     const max2 = maxDist * maxDist;
@@ -455,32 +422,12 @@ export class Game {
     return best;
   }
 
-  spawnPlayerBullet(x, y, vx, vy, r, damage, life, pierce, ricochet, chain, color, size, homing = 0) {
-    return this.bullets.spawn(x, y, vx, vy, r, damage, life, pierce, ricochet, chain, color, size, false, homing);
+  spawnPlayerBullet(x, y, vx, vy, r, damage, life, pierce, ricochet, chain, color, size, homing = 0, kind = 'bolt', splash = 0, crit = false) {
+    return this.bullets.spawn(x, y, vx, vy, r, damage, life, pierce, ricochet, chain, color, size, false, homing, kind, splash, crit);
   }
 
   spawnEnemyBullet(x, y, vx, vy, r, damage, life, color, size) {
     return this.enemyBullets.spawn(x, y, vx, vy, r, damage, life, 0, 0, 0, color, size, true);
-  }
-
-  spawnSingularity(x, y, stacks) {
-    let s = null;
-    for (let i = 0; i < this.singularities.length; i++) {
-      if (!this.singularities[i].active) {
-        s = this.singularities[i];
-        break;
-      }
-    }
-    if (!s) s = this.singularities[0];
-    s.active = true;
-    s.x = x;
-    s.y = y;
-    s.maxLife = 1.35;
-    s.life = s.maxLife;
-    s.radius = 165 + stacks * 45;
-    s.damage = 42 * stacks;
-    s.angle = rand(0, TAU);
-    this.particles.ring(x, y, '#8b5cff', 20, 260, 0.6, 3);
   }
 
   update(dt) {
@@ -493,9 +440,8 @@ export class Game {
     Quadtree.resetStats();
 
     this.comboTimer -= dt;
-    if (this.comboTimer <= 0 && this.combo > 0) {
-      this.combo = 0;
-    }
+    if (this.comboTimer <= 0 && this.combo > 0) this.combo = 0;
+
     this.enemies.eliteChance = this.elapsed > 40
       ? Math.min(0.18, 0.02 + this.threat * 0.012 + this.elapsed * 0.00035)
       : 0;
@@ -519,20 +465,15 @@ export class Game {
     this.mouseWorld.x = this.camera.x + (this.input.mouse.x - this.view.w * 0.5) / zoom;
     this.mouseWorld.y = this.camera.y + (this.input.mouse.y - this.view.h * 0.5) / (zoom * this.tilt);
 
-    const warpSlow = this.player.buffs.timewarp > 0 ? 0.42 : 1;
-    this.enemySlow = warpSlow;
-
     this.player.update(dt, this);
     this.ally.update(dt, this);
     this.updateCamera(dt);
     this.director(dt);
-    this.enemies.update(dt * warpSlow, this);
+    this.enemies.update(dt, this);
     this.buildQuadtree();
     this.enemyContact();
-    this.updateBullets(dt, warpSlow);
+    this.updateBullets(dt);
     this.pickups.update(dt, this);
-    this.updateOrbitals(dt);
-    this.updateSingularities(dt);
     this.particles.update(dt);
     this.audio.setLowHP(this.player.hp / this.player.stats.maxHp < 0.3);
     this.enemies.cleanup();
@@ -662,7 +603,7 @@ export class Game {
       this.audio.warning();
       this.audio.boss();
       this.particles.addShake(16);
-      this.particles.text(this.player.x, this.player.y - 80, `WARNING: ${boss.name}`, '#ff2f8e', 20, 2.2);
+      this.particles.text(this.player.x, this.player.y - 80, `WARNING: ${boss.name}`, '#ff3b30', 20, 2.2);
       this.onBoss(boss);
     }
   }
@@ -739,7 +680,7 @@ export class Game {
 
   _steerBullet(b, dt) {
     this.candH.length = 0;
-    this.quadtree.query(b.x, b.y, 300, this.candH);
+    this.quadtree.query(b.x, b.y, 340, this.candH);
     let best = null;
     let bestD = Infinity;
     for (let i = 0; i < this.candH.length; i++) {
@@ -762,9 +703,9 @@ export class Game {
     b.vy = Math.sin(angle) * speed;
   }
 
-  updateBullets(dt, enemySlow = 1) {
+  updateBullets(dt) {
     this._stepBullets(this.bullets, dt, false);
-    this._stepBullets(this.enemyBullets, dt * enemySlow, true);
+    this._stepBullets(this.enemyBullets, dt, true);
   }
 
   _stepBullets(pool, dt, isEnemy) {
@@ -781,6 +722,9 @@ export class Game {
       if (b.life <= 0) {
         pool.release(b);
         continue;
+      }
+      if (!isEnemy && b.kind === 'missile' && Math.random() < dt * 22) {
+        this.particles.trail(b.x, b.y, -b.vx * 0.2, -b.vy * 0.2, '#ffb347', 2.4, 0.22);
       }
       if (this._wallBounce(b, isEnemy, pool)) continue;
 
@@ -824,40 +768,32 @@ export class Game {
           b.x = e.x + nx * (e.r + 12);
           b.y = e.y + ny * (e.r + 12);
           b.damage *= 0.5;
-          this.particles.sparkBurst(b.x, b.y, 6, '#46f4ff', 260, 2.2, 0.3);
+          this.particles.sparkBurst(b.x, b.y, 6, '#8fe8ff', 260, 2.2, 0.3);
           this.audio.deflect();
           continue;
         }
 
-        if (b.hitCount < 8) b.hits[b.hitCount++] = e.id;
+        if (b.hitCount < b.hits.length) b.hits[b.hitCount++] = e.id;
 
-        let hitDamage = b.damage;
-        if (player.stats.execute > 0 && e.hp / e.maxHp < 0.3) {
-          hitDamage *= 1 + player.stats.execute;
-        }
+        const hitDamage = b.damage;
         const died = e.hit(hitDamage, this, b.vx * 0.06, b.vy * 0.06);
-        if (player.stats.frost > 0) {
-          e.slowTimer = Math.max(e.slowTimer, 1.2 + player.stats.frost * 0.25);
-        }
-        if (player.stats.lifesteal > 0) {
-          player.hp = Math.min(player.stats.maxHp, player.hp + hitDamage * player.stats.lifesteal);
-        }
+        this.particles.sparkBurst(b.x, b.y, b.kind === 'beam' ? 9 : 5, b.color, 250, 2.2, 0.32);
 
-        this.particles.sparkBurst(b.x, b.y, 5, b.color, 250, 2.2, 0.32);
-        const crit = b.color === '#ffe066';
         if (this.settings.damageNumbers !== false) {
           this.particles.text(
             e.x + rand(-7, 7),
             e.y - e.r - 8,
             String(Math.round(e.lastHitAmount || hitDamage)),
-            crit ? '#ffe066' : '#dffbff',
-            crit ? 16 : 12,
+            b.crit ? '#ffe066' : '#dffbff',
+            b.crit ? 16 : 12,
             0.6
           );
         }
-        this.audio.impact(crit);
+        this.audio.impact(b.crit);
 
-        if (b.chain > 0 && Math.random() < 0.35) {
+        if (b.splash > 0 && b.kind === 'missile') this._splashDamage(b.x, b.y, b.splash, b.damage * 0.55, b.crit, e);
+
+        if (b.chain > 0 && Math.random() < 0.45) {
           this.chainLightning(e.x, e.y, b.chain, b.damage);
         }
         if (died) this.onEnemyKilled(e);
@@ -874,12 +810,32 @@ export class Game {
     }
   }
 
+  _splashDamage(x, y, radius, damage, crit, exclude) {
+    this.candC.length = 0;
+    this.quadtree.query(x, y, radius + 40, this.candC);
+    this.particles.ring(x, y, crit ? '#ffe066' : '#ffb347', 18, radius * 3.4, 0.4, 4);
+    this.particles.sparkBurst(x, y, 16, '#ffb347', 360, 2.6, 0.5);
+    this.particles.addShake(2.2);
+    this.audio.explosion(false);
+    for (let i = 0; i < this.candC.length; i++) {
+      const e = this.candC[i];
+      if (e.dead || e === exclude) continue;
+      const d2 = dist2(x, y, e.x, e.y);
+      const rr = radius + e.r;
+      if (d2 > rr * rr) continue;
+      const falloff = 1 - Math.sqrt(d2) / rr * 0.5;
+      const died = e.hit(damage * falloff, this, (e.x - x) * 0.08, (e.y - y) * 0.08);
+      this.particles.sparkBurst(e.x, e.y, 4, '#ffd27a', 220, 2.2, 0.32);
+      if (died) this.onEnemyKilled(e);
+    }
+  }
+
   chainLightning(x, y, hops, baseDamage) {
     this.chainHits.length = 0;
     let fromX = x;
     let fromY = y;
-    const range = 330;
-    const chainDamage = baseDamage * 0.55 + this.player.stats.chainDamage;
+    const range = 340;
+    const chainDamage = baseDamage * 0.55;
 
     for (let hop = 0; hop < hops; hop++) {
       this.candB.length = 0;
@@ -897,7 +853,6 @@ export class Game {
           }
         }
         if (seen) continue;
-        if (lineCircle(fromX, fromY, e.x, e.y, e.x, e.y, e.r + 2) < 0) continue;
         const d = dist2(fromX, fromY, e.x, e.y);
         if (d < bestD) {
           bestD = d;
@@ -906,93 +861,16 @@ export class Game {
       }
       if (!best) break;
       this.chainHits.push(best.id);
-      this.particles.lightning(fromX, fromY, best.x, best.y, '#8be9ff', 2.4, 0.2);
-      this.particles.sparkBurst(best.x, best.y, 5, '#8be9ff', 200, 2, 0.3);
+      this.particles.lightning(fromX, fromY, best.x, best.y, '#7fd8ff', 2.4, 0.2);
+      this.particles.sparkBurst(best.x, best.y, 5, '#7fd8ff', 200, 2, 0.3);
       const died = best.hit(chainDamage, this, 0, 0);
       if (this.settings.damageNumbers !== false) {
-        this.particles.text(best.x, best.y - best.r - 8, String(Math.round(best.lastHitAmount || chainDamage)), '#8be9ff', 12, 0.6);
-      }
-      if (this.player.stats.frost > 0) {
-        best.slowTimer = Math.max(best.slowTimer, 1.2 + this.player.stats.frost * 0.25);
+        this.particles.text(best.x, best.y - best.r - 8, String(Math.round(best.lastHitAmount || chainDamage)), '#7fd8ff', 12, 0.6);
       }
       this.audio.zap();
       if (died) this.onEnemyKilled(best);
       fromX = best.x;
       fromY = best.y;
-    }
-  }
-
-  updateOrbitals(dt) {
-    const n = Math.floor(this.player.stats.orbitalBlades);
-    if (n <= 0) return;
-    this.bladeAngle += dt * 2.7;
-    const p = this.player;
-    const radius = 84;
-    for (let i = 0; i < n; i++) {
-      const a = this.bladeAngle + (i / n) * TAU;
-      const bx = p.x + Math.cos(a) * radius;
-      const by = p.y + Math.sin(a) * radius;
-      this.candC.length = 0;
-      this.quadtree.query(bx, by, 22, this.candC);
-      for (let j = 0; j < this.candC.length; j++) {
-        const e = this.candC[j];
-        if (e.dead || e.bladeCd > 0) continue;
-        if (!circleCircle(bx, by, 19, e.x, e.y, e.r)) continue;
-        e.bladeCd = 0.32;
-        const died = e.hit(p.stats.bladeDamage, this, Math.cos(a) * 120, Math.sin(a) * 120);
-        this.particles.sparkBurst(bx, by, 4, '#8be9ff', 200, 2, 0.28);
-        if (died) this.onEnemyKilled(e);
-      }
-    }
-  }
-
-  updateSingularities(dt) {
-    const p = this.player;
-    for (let i = 0; i < this.singularities.length; i++) {
-      const s = this.singularities[i];
-      if (!s.active) continue;
-      s.life -= dt;
-      s.angle += dt * 4.5;
-
-      this.candC.length = 0;
-      this.quadtree.query(s.x, s.y, s.radius, this.candC);
-      for (let j = 0; j < this.candC.length; j++) {
-        const e = this.candC[j];
-        if (e.dead) continue;
-        const dx = s.x - e.x;
-        const dy = s.y - e.y;
-        const d = Math.hypot(dx, dy) || 1;
-        if (d < s.radius) {
-          const force = (1 - d / s.radius) * 1150;
-          e.impulseX += (dx / d) * force * dt;
-          e.impulseY += (dy / d) * force * dt;
-        }
-      }
-      if (Math.random() < 0.35) {
-        const a = rand(0, TAU);
-        const r = s.radius * (0.4 + Math.random() * 0.6);
-        this.particles.trail(s.x + Math.cos(a) * r, s.y + Math.sin(a) * r, -Math.cos(a) * 300, -Math.sin(a) * 300, '#8b5cff', 2.2, 0.3);
-      }
-
-      if (s.life <= 0) {
-        s.active = false;
-        this.candC.length = 0;
-        this.quadtree.query(s.x, s.y, s.radius, this.candC);
-        for (let j = 0; j < this.candC.length; j++) {
-          const e = this.candC[j];
-          if (e.dead) continue;
-          if (dist2(s.x, s.y, e.x, e.y) > s.radius * s.radius) continue;
-          const died = e.hit(s.damage, this, (e.x - s.x) * 1.4, (e.y - s.y) * 1.4);
-          if (died) this.onEnemyKilled(e);
-        }
-        this.particles.ring(s.x, s.y, '#8b5cff', 30, 900, 0.6, 5);
-        this.particles.ring(s.x, s.y, '#ffffff', 12, 600, 0.45, 3);
-        this.particles.sparkBurst(s.x, s.y, 30, '#b28cff', 500, 3, 0.8);
-        this.particles.addShake(12);
-        this.particles.hit(0.8);
-        this.audio.explosion();
-        if (dist2(p.x, p.y, s.x, s.y) < 150 * 150) p.takeDamage(12, this);
-      }
     }
   }
 
@@ -1040,22 +918,21 @@ export class Game {
     this.comboBest = Math.max(this.comboBest, this.combo);
     const multiplier = this.comboMultiplier;
     this.score += Math.round(e.score * multiplier);
-    this.gainXp(e.xp);
 
     if (this.combo === 10 || this.combo === 25 || this.combo === 50 || this.combo === 100) {
       this.particles.text(
         this.player.x,
         this.player.y - 66,
         `CHAIN x${this.combo} // ${multiplier.toFixed(1)}x`,
-        this.combo >= 50 ? '#ff2f8e' : '#ffc857',
+        this.combo >= 50 ? '#ff3b30' : '#ffc857',
         18,
         1.6
       );
-      this.audio.levelUp();
+      this.audio.combo();
     }
 
     const isBoss = e.type === 'boss';
-    const color = isBoss ? '#ff2f8e' : e.color;
+    const color = isBoss ? '#ff3b30' : e.color;
     this.particles.ring(e.x, e.y, color, e.r * 0.8, isBoss ? 700 : 220, isBoss ? 0.9 : 0.4, isBoss ? 6 : 2);
     this.particles.sparkBurst(e.x, e.y, isBoss ? 70 : Math.min(18, 6 + Math.floor(e.r)), color, isBoss ? 650 : 320, isBoss ? 4 : 2.5, isBoss ? 1.2 : 0.5);
     this.particles.addShake(isBoss ? 26 : 2.5);
@@ -1064,7 +941,7 @@ export class Game {
     if (isBoss) {
       this.bossKills++;
       this.enemies.boss = null;
-      this.particles.text(e.x, e.y - 70, `${e.name || 'ARCHITECT'} TERMINATED`, '#ffd1e6', 22, 2.4);
+      this.particles.text(e.x, e.y - 70, `${e.name || 'ARCHITECT'} TERMINATED`, '#ffe6c2', 22, 2.4);
       this.particles.hit(1.6);
       this.audio.bossDeath();
       for (let i = 0; i < 4; i++) {
@@ -1091,62 +968,15 @@ export class Game {
     }
   }
 
-  gainXp(amount) {
-    this.xp += amount * this.player.stats.xpGain;
-    let leveled = false;
-    while (this.xp >= this.xpNext) {
-      this.xp -= this.xpNext;
-      this.level++;
-      this.xpNext = Math.floor(8 + this.level * 5 + Math.pow(this.level, 1.2));
-      this.pendingLevelUps++;
-      leveled = true;
-    }
-    if (leveled && !this.draftOpen) {
-      this.draftOpen = true;
-      this.audio.levelUp();
-      this.onLevelUp();
-    }
-  }
-
-  createDraft() {
-    return draftUpgrades(this.player, 3, this.level);
-  }
-
-  rerollDraft() {
-    if (this.rerolls <= 0) return null;
-    this.rerolls--;
-    this.audio.ui();
-    return this.createDraft();
-  }
-
-  applyChosen(id) {
-    const up = applyUpgrade(id, this.player, this);
-    if (up) {
-      const nextCap = Math.max(0, Math.floor(this.player.stats.rerolls));
-      if (nextCap > this.rerollCap) {
-        this.rerolls += nextCap - this.rerollCap;
-        this.rerollCap = nextCap;
-      }
-      this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
-      const activated = checkSynergies(this.player, this);
-      if (activated.length) this.onSynergy(activated);
-    }
-    if (this.pendingLevelUps <= 0) {
-      this.pendingLevelUps = 0;
-      this.draftOpen = false;
-    }
-    return this.pendingLevelUps;
-  }
-
   onPlayerDeath() {
     if (this.over) return;
     this.over = true;
     this.audio.stopMusic();
     this.audio.gameOver();
     this.audio.explosion(true);
-    this.particles.ring(this.player.x, this.player.y, '#ff2f8e', 20, 900, 0.9, 7);
-    this.particles.ring(this.player.x, this.player.y, '#ffffff', 10, 600, 0.6, 4);
-    this.particles.sparkBurst(this.player.x, this.player.y, 80, '#ff2f8e', 700, 4, 1.3);
+    this.particles.ring(this.player.x, this.player.y, '#ff3b30', 20, 900, 0.9, 7);
+    this.particles.ring(this.player.x, this.player.y, '#ffe066', 10, 600, 0.6, 4);
+    this.particles.sparkBurst(this.player.x, this.player.y, 80, '#ff7a4d', 700, 4, 1.3);
     this.particles.hit(2);
     this.onGameOver();
   }
@@ -1154,15 +984,15 @@ export class Game {
   finalizeRun() {
     if (this.finalized) return 0;
     this.finalized = true;
-    const earned = Math.floor((this.score / 100 + this.level * 3) * this.save.currencyMultiplier());
+    const earned = Math.floor((this.score / 100 + this.threat * 8 + this.kills * 0.5) * this.save.currencyMultiplier());
     this.save.addCurrency(earned);
     this.save.addScore({
       score: this.score,
       time: this.elapsed,
-      level: this.level,
+      threat: this.threat,
       kills: this.kills,
       combo: this.comboBest,
-      doctrine: this.doctrine.id,
+      mark: this.mark.id,
       date: new Date().toISOString().slice(0, 10)
     });
     return earned;
@@ -1185,7 +1015,6 @@ export class Game {
     this._drawFloor(ctx, camX, camY);
     this._drawShadows(ctx, alpha);
     this.player.drawGhosts(ctx, alpha);
-    this._drawSingularities(ctx, alpha);
 
     this.setGroundTransform(ctx, 12);
     this._drawBullets(ctx, this.bullets, alpha, false);
@@ -1229,7 +1058,7 @@ export class Game {
         ref.renderAngle = this.projectAngle(ref.angle);
         if (ref.shieldAngle != null) ref.renderShieldAngle = this.projectAngle(ref.shieldAngle);
       } else if (a.kind === 'ally') {
-        height = 16;
+        height = 17;
         ref.renderAngle = this.projectAngle(ref.angle);
       } else if (a.kind === 'pickup') {
         height = 11;
@@ -1238,9 +1067,6 @@ export class Game {
       if (a.kind === 'pickup') this._drawPickup(ctx, ref);
       else ref.draw(ctx, alpha);
     }
-
-    this.setGroundTransform(ctx, 10);
-    this._drawBlades(ctx, alpha);
 
     this.particles.draw(ctx, this);
 
@@ -1259,16 +1085,16 @@ export class Game {
     const w = view.w;
     const h = view.h;
     const sky = ctx.createLinearGradient(0, 0, 0, h);
-    sky.addColorStop(0, '#05000f');
-    sky.addColorStop(0.55, '#0c0621');
-    sky.addColorStop(1, '#1b0626');
+    sky.addColorStop(0, '#05070d');
+    sky.addColorStop(0.55, '#0a101c');
+    sky.addColorStop(1, '#1a100c');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, w, h);
 
-    const glow = ctx.createRadialGradient(w * 0.5, h * 0.54, 0, w * 0.5, h * 0.54, h * 0.85);
-    glow.addColorStop(0, 'rgba(139, 92, 255, 0.18)');
-    glow.addColorStop(0.45, 'rgba(255, 47, 142, 0.05)');
-    glow.addColorStop(1, 'rgba(139, 92, 255, 0)');
+    const glow = ctx.createRadialGradient(w * 0.5, h * 0.58, 0, w * 0.5, h * 0.58, h * 0.9);
+    glow.addColorStop(0, 'rgba(255, 183, 77, 0.15)');
+    glow.addColorStop(0.45, 'rgba(255, 59, 48, 0.055)');
+    glow.addColorStop(1, 'rgba(143, 232, 255, 0)');
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, w, h);
 
@@ -1307,7 +1133,7 @@ export class Game {
     const startX = Math.floor(left / step) * step;
     const startY = Math.floor(top / step) * step;
     ctx.lineWidth = 1.2;
-    ctx.strokeStyle = 'rgba(70, 244, 255, 0.06)';
+    ctx.strokeStyle = 'rgba(143, 232, 255, 0.06)';
     ctx.beginPath();
     for (let x = startX; x <= right + step; x += step) {
       ctx.moveTo(x, top);
@@ -1322,7 +1148,7 @@ export class Game {
     const major = step * 5;
     const mx0 = Math.floor(left / major) * major;
     const my0 = Math.floor(top / major) * major;
-    ctx.strokeStyle = 'rgba(139, 92, 255, 0.12)';
+    ctx.strokeStyle = 'rgba(255, 183, 77, 0.11)';
     ctx.lineWidth = 1.4;
     ctx.beginPath();
     for (let x = mx0; x <= right + major; x += major) {
@@ -1337,7 +1163,7 @@ export class Game {
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = 'rgba(70, 244, 255, 0.35)';
+    ctx.fillStyle = 'rgba(255, 183, 77, 0.32)';
     const dotStep = major;
     const dx0 = Math.floor(left / dotStep) * dotStep;
     const dy0 = Math.floor(top / dotStep) * dotStep;
@@ -1349,12 +1175,12 @@ export class Game {
     ctx.restore();
 
     ctx.save();
-    ctx.shadowColor = '#46f4ff';
+    ctx.shadowColor = '#ffb347';
     ctx.shadowBlur = 20;
-    ctx.strokeStyle = 'rgba(70, 244, 255, 0.6)';
+    ctx.strokeStyle = 'rgba(255, 183, 77, 0.55)';
     ctx.lineWidth = 2.5;
     ctx.strokeRect(1, 1, this.world.w - 2, this.world.h - 2);
-    ctx.strokeStyle = 'rgba(255, 47, 142, 0.3)';
+    ctx.strokeStyle = 'rgba(255, 59, 48, 0.3)';
     ctx.lineWidth = 1.5;
     ctx.strokeRect(16, 16, this.world.w - 32, this.world.h - 32);
     ctx.restore();
@@ -1407,17 +1233,17 @@ export class Game {
       ctx.fill();
     }
     shadow(this.player, 17);
-    if (this.ally && !this.ally.downed) shadow(this.ally, 14);
+    if (this.ally && !this.ally.downed) shadow(this.ally, 15);
     ctx.restore();
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const px = this.player.px + (this.player.x - this.player.px) * alpha;
     const py = this.player.py + (this.player.y - this.player.py) * alpha;
-    ctx.strokeStyle = 'rgba(70, 244, 255, 0.35)';
+    ctx.strokeStyle = 'rgba(143, 232, 255, 0.35)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(px, py, 24, 0, TAU);
+    ctx.arc(px, py, 25, 0, TAU);
     ctx.stroke();
     if (this.ally && !this.ally.downed) {
       const ax = this.ally.px + (this.ally.x - this.ally.px) * alpha;
@@ -1425,7 +1251,7 @@ export class Game {
       ctx.strokeStyle = this.ally.colors.stroke;
       ctx.globalAlpha = 0.5;
       ctx.beginPath();
-      ctx.arc(ax, ay, 20, 0, TAU);
+      ctx.arc(ax, ay, 22, 0, TAU);
       ctx.stroke();
     }
     ctx.restore();
@@ -1478,88 +1304,34 @@ export class Game {
       const y = b.py + (b.y - b.py) * alpha;
       const px = b.px;
       const py = b.py;
+      const missile = b.kind === 'missile';
+      const beam = b.kind === 'beam';
       ctx.strokeStyle = b.color;
       ctx.globalAlpha = isEnemy ? 0.9 : 0.95;
-      ctx.lineWidth = b.size;
+      ctx.lineWidth = missile ? b.size * 1.4 : beam ? b.size * 1.5 : b.size;
       ctx.beginPath();
       ctx.moveTo(px, py);
       ctx.lineTo(x, y);
       ctx.stroke();
-      if (isEnemy) {
+      if (missile) {
+        ctx.fillStyle = '#fff3c4';
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(x, y, b.size * 0.8, 0, TAU);
+        ctx.fill();
+      } else if (beam) {
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.8;
+        ctx.beginPath();
+        ctx.arc(x, y, b.size * 0.6, 0, TAU);
+        ctx.fill();
+      } else if (isEnemy) {
         ctx.fillStyle = b.color;
         ctx.globalAlpha = 0.65;
         ctx.beginPath();
         ctx.arc(x, y, b.size * 0.9, 0, TAU);
         ctx.fill();
       }
-    }
-    ctx.restore();
-    ctx.globalAlpha = 1;
-  }
-
-  _drawSingularities(ctx, alpha) {
-    for (let i = 0; i < this.singularities.length; i++) {
-      const s = this.singularities[i];
-      if (!s.active) continue;
-      const t = 1 - s.life / s.maxLife;
-      const radius = s.radius * (0.55 + t * 0.45);
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.strokeStyle = 'rgba(139, 92, 255, 0.5)';
-      ctx.lineWidth = 2;
-      for (let k = 0; k < 3; k++) {
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, radius * (0.35 + k * 0.22), s.angle + k * 2, s.angle + k * 2 + Math.PI * 1.2);
-        ctx.stroke();
-      }
-      ctx.fillStyle = 'rgba(10, 0, 25, 0.55)';
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, radius * 0.22, 0, TAU);
-      ctx.fill();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = 'rgba(178, 140, 255, 0.7)';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, 5 + Math.sin(s.angle * 3) * 2, 0, TAU);
-      ctx.fill();
-      ctx.restore();
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  _drawBlades(ctx, alpha) {
-    const n = Math.floor(this.player.stats.orbitalBlades);
-    if (n <= 0) return;
-    const p = this.player;
-    const px = p.px + (p.x - p.px) * alpha;
-    const py = p.py + (p.y - p.py) * alpha;
-    const radius = 84;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < n; i++) {
-      const a = this.bladeAngle + (i / n) * TAU;
-      const bx = px + Math.cos(a) * radius;
-      const by = py + Math.sin(a) * radius;
-      ctx.save();
-      ctx.translate(bx, by);
-      ctx.rotate(a + this.bladeAngle * 0.6);
-      ctx.fillStyle = 'rgba(70, 244, 255, 0.9)';
-      ctx.strokeStyle = '#dffbff';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(11, 0);
-      ctx.lineTo(-4, -6);
-      ctx.lineTo(-1, 0);
-      ctx.lineTo(-4, 6);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-      ctx.strokeStyle = 'rgba(70, 244, 255, 0.15)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(px, py, radius, a - 0.15, a + 0.15);
-      ctx.stroke();
     }
     ctx.restore();
     ctx.globalAlpha = 1;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the PWA icon set from the same geometry as assets/icon.svg.
+"""Render the WARFORGE PWA icon set from the same geometry as assets/icon.svg.
 
 Requires Pillow and NumPy (development-time only; the game itself has no
 runtime dependencies). Run from the repository root:
@@ -9,7 +9,6 @@ runtime dependencies). Run from the repository root:
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +17,6 @@ from PIL import Image, ImageDraw, ImageFilter
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "assets"
 MASTER = 1024
-SS = 3  # internal supersampling for the 1024 master
 
 
 def lerp(a: float, b: float, t: float) -> float:
@@ -26,14 +24,14 @@ def lerp(a: float, b: float, t: float) -> float:
 
 
 def background(size: int) -> Image.Image:
-    """Diagonal violet-to-black gradient with a warm central halo."""
+    """Dark Stark hangar gradient with a warm reactor halo."""
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
     u = (xx / (size - 1) + yy / (size - 1)) * 0.5
     v = yy / (size - 1)
 
-    top = np.array([21, 8, 38], dtype=np.float32)
-    mid = np.array([6, 1, 15], dtype=np.float32)
-    bottom = np.array([28, 6, 41], dtype=np.float32)
+    top = np.array([5, 7, 13], dtype=np.float32)
+    mid = np.array([11, 16, 25], dtype=np.float32)
+    bottom = np.array([36, 16, 10], dtype=np.float32)
 
     img = np.empty((size, size, 3), dtype=np.float32)
     for c in range(3):
@@ -45,130 +43,134 @@ def background(size: int) -> Image.Image:
     img *= (0.9 + u[..., None] * 0.14)
 
     cx = cy = size * 0.5
-    dist = np.sqrt((xx - cx) ** 2 + (yy - cy * 0.84) ** 2) / (size * 0.62)
+    dist = np.sqrt((xx - cx) ** 2 + (yy - cy * 0.9) ** 2) / (size * 0.62)
     glow = np.clip(1.0 - dist, 0.0, 1.0) ** 2
-    for c, amount in enumerate((255, 47, 142)):
-        img[..., c] += glow * amount * 0.20
-    for c, amount in enumerate((139, 92, 255)):
+    for c, amount in enumerate((255, 179, 71)):
+        img[..., c] += glow * amount * 0.15
+    for c, amount in enumerate((181, 18, 27)):
         img[..., c] += glow * amount * 0.10
 
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGB").convert("RGBA")
 
 
 def draw_art(size: int, scale: float = 1.0) -> Image.Image:
-    """Draw the sigil on a transparent canvas at `size` pixels."""
+    """Draw the Iron Man helmet sigil on a transparent canvas."""
     canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     s = size / 512.0
 
-    def p(v: float) -> float:
+    def x(v: float) -> float:
         return (256.0 + (v - 256.0) * scale) * s
 
-    cx = cy = 256.0 * s
-    unit = s * scale
+    def y(v: float) -> float:
+        return (256.0 + (v - 256.0) * scale) * s
 
-    # --- backdrop grid ---------------------------------------------------
+    def pts(values: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        return [(x(px), y(py)) for px, py in values]
+
+    def w(units: float) -> int:
+        return max(1, int(units * s * max(scale, 0.18)))
+
+    # --- faint hangar grid ------------------------------------------------
     grid = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     gd = ImageDraw.Draw(grid)
     for i in range(1, 8):
         q = i * 64 * s
-        gd.line([(0, q), (size, q)], fill=(70, 244, 255, 16), width=max(1, int(s)))
-        gd.line([(q, 0), (q, size)], fill=(70, 244, 255, 16), width=max(1, int(s)))
-    gd.ellipse(
-        [p(44), p(44), p(468), p(468)],
-        outline=(70, 244, 255, 20),
-        width=max(1, int(1.2 * s)),
-    )
+        gd.line([(0, q), (size, q)], fill=(143, 232, 255, 14), width=max(1, int(s)))
+        gd.line([(q, 0), (q, size)], fill=(143, 232, 255, 14), width=max(1, int(s)))
     canvas.alpha_composite(grid)
 
-    # --- cyan reticle ----------------------------------------------------
-    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    ring_box = [p(104), p(104), p(408), p(408)]
-    gd.ellipse(ring_box, outline=(70, 244, 255, 255), width=max(2, int(8 * unit)))
-    for tick in (0, 90, 180, 270):
-        a = math.radians(tick)
-        inner = 184 * unit
-        outer = 224 * unit
-        gd.line(
-            [
-                (cx + math.cos(a) * inner, cy + math.sin(a) * inner),
-                (cx + math.cos(a) * outer, cy + math.sin(a) * outer),
-            ],
-            fill=(70, 244, 255, 255),
-            width=max(1, int(7 * unit)),
-        )
-    gd.ellipse(
-        [p(140), p(140), p(372), p(372)],
-        outline=(70, 244, 255, 100),
-        width=max(1, int(1.5 * unit)),
-    )
-
-    # Dashed arc: 12 bright segments with breathing gaps.
-    ring_r = 165 * unit
+    # --- gold reactor ring ------------------------------------------------
+    ring = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    rd = ImageDraw.Draw(ring)
+    cx, cy = x(256), y(252)
+    ring_r = 196 * scale * s
     for i in range(12):
-        start = -24 + i * 30
-        gd.arc(
+        start = -18 + i * 30
+        rd.arc(
             [cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r],
             start=start,
             end=start + 21,
-            fill=(70, 244, 255, 245),
-            width=max(2, int(7 * unit)),
+            fill=(255, 179, 71, 220),
+            width=w(3),
         )
+    inner_r = 170 * scale * s
+    rd.ellipse(
+        [cx - inner_r, cy - inner_r, cx + inner_r, cy + inner_r],
+        outline=(255, 75, 58, 90),
+        width=w(2),
+    )
+    canvas.alpha_composite(ring.filter(ImageFilter.GaussianBlur(radius=9 * s)))
+    canvas.alpha_composite(ring)
 
-    blur = glow.filter(ImageFilter.GaussianBlur(radius=13 * s * max(scale, 0.7)))
-    canvas.alpha_composite(blur)
-    canvas.alpha_composite(glow)
-
-    # --- pink core -------------------------------------------------------
-    core_glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    cd = ImageDraw.Draw(core_glow)
-
-    def diamond(r: float) -> list[tuple[float, float]]:
-        return [(cx, cy - r * unit), (cx + r * unit, cy), (cx, cy + r * unit), (cx - r * unit, cy)]
-
-    cd.polygon(diamond(112), fill=(255, 47, 142, 70))
-    cd.line(diamond(112) + [diamond(112)[0]], fill=(255, 47, 142, 235), width=max(2, int(6 * unit)), joint="curve")
-    cd.polygon(diamond(49), fill=(255, 47, 142, 255), outline=(255, 215, 242, 255), width=max(1, int(2.5 * unit)))
-    cd.polygon(diamond(26), fill=(255, 211, 107, 255))
-
-    halo = core_glow.filter(ImageFilter.GaussianBlur(radius=22 * s * max(scale, 0.7)))
-    canvas.alpha_composite(halo)
-    canvas.alpha_composite(core_glow)
-
-    # --- satellite swarm nodes ------------------------------------------
-    nodes = [
-        (256, 92, 7, (89, 255, 168, 255)),
-        (382, 162, 5, (89, 255, 168, 255)),
-        (406, 322, 7, (89, 255, 168, 255)),
-        (292, 414, 5, (89, 255, 168, 255)),
-        (132, 376, 7, (89, 255, 168, 255)),
-        (108, 196, 5, (89, 255, 168, 255)),
+    # --- red helmet shell -------------------------------------------------
+    shell = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shell)
+    helmet = [
+        (256, 70), (318, 80), (350, 108), (370, 150), (370, 282), (356, 340),
+        (330, 388), (294, 418), (256, 440), (218, 418), (182, 388), (156, 340),
+        (142, 282), (142, 150), (162, 108), (194, 80),
     ]
-    node_layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    nd = ImageDraw.Draw(node_layer)
-    for x, y, r, color in nodes:
-        rr = r * unit
-        nd.ellipse([p(x) - rr, p(y) - rr, p(x) + rr, p(y) + rr], fill=color)
-    node_glow = node_layer.filter(ImageFilter.GaussianBlur(radius=9 * s))
-    canvas.alpha_composite(node_glow)
-    canvas.alpha_composite(node_layer)
+    sd.polygon(pts(helmet), fill=(200, 29, 37, 255))
+    # Lighter crown highlight.
+    sd.polygon(
+        pts([(256, 70), (318, 80), (350, 108), (370, 150), (340, 170), (300, 130), (256, 116), (212, 130), (172, 170), (142, 150), (162, 108), (194, 80)]),
+        fill=(255, 106, 77, 55),
+    )
+    sd.line(pts(helmet + [helmet[0]]), fill=(255, 215, 106, 255), width=w(5), joint="curve")
 
-    # --- gold corner cuts ------------------------------------------------
-    cuts = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    kd = ImageDraw.Draw(cuts)
-    for x, y, dx, dy in [
-        (174, 134, 16, 16),
-        (338, 362, 16, 16),
-        (356, 146, -14, 14),
-        (156, 356, 14, 14),
-    ]:
-        kd.line(
-            [(p(x), p(y)), (p(x + dx), p(y + dy))],
-            fill=(255, 200, 87, 210),
-            width=max(1, int(3 * unit)),
+    # Ear plates.
+    left_ear = [(170, 236), (144, 236), (132, 298), (150, 360), (168, 344), (158, 300)]
+    right_ear = [(512 - px, py) for px, py in left_ear]
+    for ear in (left_ear, right_ear):
+        sd.polygon(pts(ear), fill=(141, 17, 25, 255), outline=(255, 215, 106, 255), width=w(3))
+
+    # --- gold faceplate ---------------------------------------------------
+    face = [
+        (256, 112), (300, 124), (322, 164), (328, 206), (328, 276), (314, 334),
+        (288, 376), (256, 398), (224, 376), (198, 334), (184, 276), (184, 206),
+        (190, 164), (212, 124),
+    ]
+    sd.polygon(pts(face), fill=(232, 182, 74, 255), outline=(255, 243, 196, 255), width=w(2))
+    sd.line(pts([(256, 132), (256, 398)]), fill=(180, 129, 31, 130), width=w(2))
+    sd.line(pts([(206, 186), (232, 176), (280, 176), (306, 186)]), fill=(180, 129, 31, 150), width=w(3))
+
+    # --- glowing eyes -----------------------------------------------------
+    left_eye = [(203, 210), (246, 216), (242, 240), (203, 233)]
+    right_eye = [(512 - px, py) for px, py in left_eye]
+    eye_glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ed = ImageDraw.Draw(eye_glow)
+    for eye in (left_eye, right_eye):
+        ed.polygon(pts(eye), fill=(143, 232, 255, 255))
+    canvas.alpha_composite(eye_glow.filter(ImageFilter.GaussianBlur(radius=10 * s)))
+    canvas.alpha_composite(shell)
+    canvas.alpha_composite(eye_glow)
+
+    # --- mouth grille -----------------------------------------------------
+    detail = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    dd = ImageDraw.Draw(detail)
+    for row, (x0, x1) in enumerate(((222, 290), (229, 283), (237, 275))):
+        yy = 330 + row * 16
+        dd.line([(x(x0), y(yy)), (x(x1), y(yy))], fill=(124, 90, 36, 255), width=w(4))
+    dd.polygon(
+        pts([(256, 286), (273, 316), (256, 330), (239, 316)]),
+        fill=(232, 182, 74, 255),
+        outline=(124, 90, 36, 255),
+        width=w(2),
+    )
+
+    # --- arc-blue specular points ----------------------------------------
+    for px, py, r in ((256, 252, 5), (130, 158, 4), (386, 348, 5), (112, 344, 3)):
+        rr = r * scale * s
+        dd.ellipse(
+            [x(px) - rr, y(py) - rr, x(px) + rr, y(py) + rr],
+            fill=(143, 232, 255, 210),
         )
-    canvas.alpha_composite(cuts)
 
+    # --- gold corner cuts -------------------------------------------------
+    for x0, y0, dx, dy in ((206, 94, 14, 16), (306, 94, -14, 16), (414, 252, -22, 0), (120, 252, -22, 0)):
+        dd.line([(x(x0), y(y0)), (x(x0 + dx), y(y0 + dy))], fill=(255, 215, 106, 220), width=w(3))
+
+    canvas.alpha_composite(detail)
     return canvas
 
 

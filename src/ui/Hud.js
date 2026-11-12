@@ -1,32 +1,32 @@
-import { UPGRADES, RARITY_NAMES } from '../systems/Upgrades.js';
-import { SYNERGY_TAGS, SYNERGY_TIERS, tagCounts } from '../systems/Synergies.js';
-import { ABILITIES } from '../systems/Abilities.js';
+import { WEAPONS } from '../systems/Weapons.js';
 import { clamp, formatTime } from '../engine/MathUtils.js';
 
 const el = (id) => document.getElementById(id);
-const UPGRADE_BY_ID = new Map(UPGRADES.map((u) => [u.id, u]));
 
+/**
+ * Combat HUD for the Iron Man / War Machine build. There is no XP bar, no
+ * level and no draft overlay — the armor mark and the five-weapon rack are the
+ * entire build, so the HUD simply reports the suit's live state.
+ */
 export class Hud {
-  constructor({ audio, onChoose, onReroll }) {
+  constructor({ audio } = {}) {
     this.audio = audio;
-    this.onChoose = onChoose;
-    this.onReroll = onReroll;
 
     this.hudEl = el('hud');
     this.hpFill = el('hp-fill');
     this.hpText = el('hp-text');
-    this.xpFill = el('xp-fill');
-    this.xpText = el('xp-text');
-    this.level = el('hud-level');
     this.name = el('hud-name');
-    this.doctrine = el('hud-doctrine');
+    this.mark = el('hud-mark');
     this.score = el('hud-score');
     this.time = el('hud-time');
     this.kills = el('hud-kills');
-    this.elites = el('hud-elites');
+    this.bosses = el('hud-bosses');
     this.heatFill = el('heat-fill');
     this.heatStatus = el('heat-status');
     this.dashPips = el('dash-pips');
+    this.missileFill = el('missile-fill');
+    this.missileStatus = el('missile-status');
+    this.weaponRack = el('weapon-rack');
     this.bossBar = el('boss-bar');
     this.bossFill = el('boss-fill');
     this.bossName = el('boss-name');
@@ -38,39 +38,19 @@ export class Hud {
     this.comboValue = el('combo-value');
     this.comboCount = el('combo-count');
     this.threat = el('hud-threat');
-    this.abilityHud = el('ability-hud');
     this.allyChip = el('ally-chip');
     this.allyState = el('ally-state');
-    this.draft = el('draft');
-    this.draftCards = el('draft-cards');
-    this.draftLevel = el('draft-level');
-    this.draftRerolls = el('draft-rerolls');
-    this.draftRerollBtn = el('btn-reroll');
     this.pause = el('pause');
     this.pauseStats = el('pause-stats');
-    this.pauseBuild = el('pause-build');
-    this.pauseSynergies = el('pause-synergies');
+    this.pauseLoadout = el('pause-loadout');
     this.gameover = el('gameover');
     this.toastEl = el('toast');
-    this.synergyBanner = el('synergy-banner');
-    this.synergyName = el('synergy-name');
-    this.synergyDesc = el('synergy-desc');
     this.lastHudText = 0;
     this.toastTimer = 0;
-    this.synergyTimer = 0;
     this.bossTimer = 0;
+    this.weaponChips = [];
 
-    this.buildAbilityHud();
-    if (this.draftRerollBtn) {
-      this.draftRerollBtn.addEventListener('click', () => this.onReroll());
-    }
-    if (this.draftCards) {
-      this.draftCards.addEventListener('click', (e) => {
-        const card = e.target.closest('.draft-card');
-        if (!card) return;
-        this.onChoose(Number(card.dataset.index));
-      });
-    }
+    this.buildWeaponRack();
   }
 
   toast(message, duration = 1900) {
@@ -81,28 +61,33 @@ export class Hud {
     this.toastTimer = setTimeout(() => this.toastEl.classList.remove('show'), duration);
   }
 
-  showHud() { this.hudEl.classList.remove('hidden'); }
-  hideHud() { this.hudEl.classList.add('hidden'); }
+  showHud() { if (this.hudEl) this.hudEl.classList.remove('hidden'); }
+  hideHud() { if (this.hudEl) this.hudEl.classList.add('hidden'); }
 
-  buildAbilityHud() {
-    if (!this.abilityHud) return;
-    this.abilityHud.innerHTML = '';
-    for (let i = 0; i < ABILITIES.length; i++) {
-      const ab = ABILITIES[i];
+  buildWeaponRack() {
+    if (!this.weaponRack) return;
+    this.weaponRack.innerHTML = '';
+    this.weaponChips = [];
+    for (let i = 0; i < WEAPONS.length; i++) {
+      const weapon = WEAPONS[i];
       const chip = document.createElement('div');
-      chip.className = 'ability-chip ready';
-      chip.dataset.id = ab.id;
-      chip.style.setProperty('--ab', ab.color);
+      chip.className = 'weapon-chip';
+      chip.dataset.id = weapon.id;
+      chip.style.setProperty('--wc', weapon.color);
+      chip.setAttribute('role', 'listitem');
+
       const key = document.createElement('b');
-      key.textContent = ab.keyLabel;
+      key.textContent = weapon.key;
       const name = document.createElement('span');
-      name.textContent = ab.short;
-      const cd = document.createElement('i');
-      cd.textContent = 'RDY';
+      name.textContent = weapon.short;
+      const label = document.createElement('i');
+      label.textContent = weapon.name;
+
       chip.appendChild(key);
       chip.appendChild(name);
-      chip.appendChild(cd);
-      this.abilityHud.appendChild(chip);
+      chip.appendChild(label);
+      this.weaponRack.appendChild(chip);
+      this.weaponChips.push(chip);
     }
   }
 
@@ -110,18 +95,14 @@ export class Hud {
     if (!game || !this.hudEl) return;
     const p = game.player;
     const hpRatio = clamp(p.hp / p.stats.maxHp, 0, 1);
-    const xpRatio = clamp(game.xp / game.xpNext, 0, 1);
+    const heat = clamp(p.heat, 0, 1);
 
     this.hpFill.style.width = `${hpRatio * 100}%`;
     this.hpFill.parentElement.classList.toggle('low', hpRatio < 0.3);
     this.hpText.textContent = `${Math.ceil(p.hp)} / ${Math.round(p.stats.maxHp)}`;
-    this.xpFill.style.width = `${xpRatio * 100}%`;
-    this.xpText.textContent = `XP ${Math.floor(game.xp)} / ${game.xpNext}`;
-    this.level.textContent = `LV ${game.level}`;
-    this.name.textContent = `OPERATOR // ${p.callsign || 'NOVA'}`;
-    this.doctrine.textContent = game.doctrine.name;
+    this.name.textContent = `${p.callsign || 'TONY'} // IRON MAN`;
+    this.mark.textContent = game.mark.name;
 
-    const heat = clamp(p.heat, 0, 1);
     this.heatFill.style.width = `${heat * 100}%`;
     this.heatFill.parentElement.classList.toggle('hot', heat > 0.7 && !p.overheated);
     this.heatFill.parentElement.classList.toggle('over', p.overheated);
@@ -140,7 +121,8 @@ export class Hud {
     }
 
     this.updateDashPips(p);
-    this.updateAbilityHud(p);
+    this.updateWeaponRack(p);
+    this.updateMissiles(p);
     this.updateCombo(game);
     this.updateAlly(game);
     this.updateBoss(game);
@@ -150,10 +132,31 @@ export class Hud {
       this.score.textContent = String(game.score);
       this.time.textContent = formatTime(game.elapsed);
       this.kills.textContent = String(game.kills);
-      if (this.elites) this.elites.textContent = String(game.elitesKilled + game.bossKills);
+      if (this.bosses) this.bosses.textContent = String(game.bossKills);
     }
     if (this.threat) this.threat.textContent = String(game.threat);
     document.body.classList.toggle('low-hp', hpRatio < 0.3 && state === 'playing');
+  }
+
+  updateWeaponRack(player) {
+    for (let i = 0; i < this.weaponChips.length; i++) {
+      const chip = this.weaponChips[i];
+      const active = i === player.weaponIndex;
+      chip.classList.toggle('active', active);
+      chip.setAttribute('aria-current', active ? 'true' : 'false');
+      chip.classList.toggle('overheated', active && player.overheated);
+    }
+  }
+
+  updateMissiles(player) {
+    if (!this.missileFill) return;
+    const total = 7;
+    const ready = player.missileCooldown <= 0;
+    this.missileFill.style.width = `${ready ? 100 : clamp(1 - player.missileCooldown / total, 0, 1) * 100}%`;
+    this.missileFill.parentElement.classList.toggle('ready', ready);
+    if (this.missileStatus) {
+      this.missileStatus.textContent = ready ? `READY x${Math.round(player.stats.missileCount)}` : `${Math.ceil(player.missileCooldown)}s`;
+    }
   }
 
   updateCombo(game) {
@@ -171,10 +174,10 @@ export class Hud {
     const a = game.ally;
     if (a.downed) {
       this.allyChip.classList.add('down');
-      this.allyState.textContent = `WINGMAN DOWN ${Math.max(0, Math.ceil(a.respawn))}s`;
+      this.allyState.textContent = `WAR MACHINE DOWN ${Math.max(0, Math.ceil(a.respawn))}s`;
     } else {
       this.allyChip.classList.remove('down');
-      this.allyState.textContent = `WINGMAN ${Math.round(a.hp)}/${a.maxHp}`;
+      this.allyState.textContent = `WAR MACHINE ${Math.round(a.hp)}/${a.maxHp}`;
     }
   }
 
@@ -185,7 +188,7 @@ export class Hud {
       this.bossFill.style.width = `${clamp(boss.hp / boss.maxHp, 0, 1) * 100}%`;
       this.bossName.textContent = boss.name || 'THE ARCHITECT';
       this.bossPhase.textContent = `PHASE ${['I', 'II', 'III', 'IV'][boss.phase - 1] || 'I'}`;
-    } else {
+    } else if (this.bossBar) {
       this.bossBar.classList.add('hidden');
     }
   }
@@ -208,136 +211,26 @@ export class Hud {
     }
   }
 
-  updateAbilityHud(player) {
-    if (!this.abilityHud) return;
-    for (let i = 0; i < ABILITIES.length; i++) {
-      const ab = ABILITIES[i];
-      const chip = this.abilityHud.children[i];
-      if (!chip) continue;
-      const slot = player.abilities[ab.id];
-      const cd = slot ? slot.cd : 0;
-      const total = Math.max(0.001, ab.cooldown * (player.stats.cooldownMult || 1));
-      const label = chip.children[2];
-      if (cd > 0) {
-        chip.classList.remove('ready');
-        chip.style.setProperty('--cd', String(clamp(cd / total, 0, 1)));
-        label.textContent = `${Math.ceil(cd)}s`;
-      } else {
-        chip.classList.add('ready');
-        chip.style.setProperty('--cd', '0');
-        label.textContent = 'RDY';
-      }
-    }
-  }
-
   showBossIntro(boss) {
     if (!this.bossIntro || !boss) return;
-    this.bossIntroName.textContent = boss.name || 'SECTOR GUARDIAN';
-    this.bossIntroSub.textContent = boss.type === 'boss'
-      ? 'BREAK THE CORE // SURVIVE THE RESPONSE'
-      : 'HEAVY UNIT INBOUND // HOLD THE LINE';
+    this.bossIntroName.textContent = boss.name || 'HEAVY UNIT';
+    this.bossIntroSub.textContent = 'BREAK THE CORE // SURVIVE THE RESPONSE';
     this.bossIntro.classList.remove('hidden');
     clearTimeout(this.bossTimer);
     this.bossTimer = setTimeout(() => this.bossIntro.classList.add('hidden'), 2800);
   }
 
-  showSynergy(tier) {
-    if (!this.synergyBanner || !tier) return;
-    const meta = SYNERGY_TAGS[tier.tag];
-    this.synergyName.textContent = tier.name;
-    this.synergyDesc.textContent = tier.desc;
-    this.synergyBanner.style.borderColor = meta ? meta.color : '#59ffa8';
-    this.synergyBanner.classList.remove('hidden');
-    clearTimeout(this.synergyTimer);
-    this.synergyTimer = setTimeout(() => this.synergyBanner.classList.add('hidden'), 3200);
-  }
-
-  showDraft(game, choices) {
-    if (!this.draft) return;
-    this.draftLevel.textContent = String(game.level);
-    this.draftRerolls.textContent = String(game.rerolls);
-    this.draftRerollBtn.disabled = game.rerolls <= 0;
-    this.renderDraftChoices(game, choices);
-    this.draft.classList.remove('hidden');
-  }
-
-  hideDraft() {
-    this.draft.classList.add('hidden');
-  }
-
-  renderDraftChoices(game, choices) {
-    this.draftCards.innerHTML = '';
-    for (let i = 0; i < choices.length; i++) {
-      const up = choices[i];
-      const stacks = game.player.upgradeCounts[up.id] || 0;
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'draft-card';
-      card.dataset.rarity = String(up.rarity);
-      card.dataset.index = String(i);
-
-      const top = document.createElement('div');
-      top.className = 'dc-top';
-      const key = document.createElement('span');
-      key.className = 'dc-key';
-      key.textContent = String(i + 1);
-      const rarity = document.createElement('span');
-      rarity.className = 'dc-rarity';
-      rarity.textContent = RARITY_NAMES[up.rarity] || 'COMMON';
-      top.appendChild(key);
-      top.appendChild(rarity);
-
-      const name = document.createElement('div');
-      name.className = 'dc-name';
-      name.textContent = up.name;
-
-      const desc = document.createElement('div');
-      desc.className = 'dc-desc';
-      desc.textContent = up.desc;
-
-      const tags = document.createElement('div');
-      tags.className = 'dc-tags';
-      const list = up.tags || [];
-      for (let t = 0; t < list.length; t++) {
-        const meta = SYNERGY_TAGS[list[t]];
-        const tag = document.createElement('span');
-        tag.className = 'dc-tag';
-        tag.style.setProperty('--tg', meta ? meta.color : '#8fa7b8');
-        tag.textContent = meta ? meta.name : String(list[t]).toUpperCase();
-        tags.appendChild(tag);
-      }
-
-      const stack = document.createElement('div');
-      stack.className = 'dc-stack';
-      const stackText = document.createElement('span');
-      stackText.textContent = 'MODULE STACK';
-      const stackVal = document.createElement('b');
-      stackVal.textContent = `${stacks + 1} / ${up.max}`;
-      stack.appendChild(stackText);
-      stack.appendChild(stackVal);
-
-      card.appendChild(top);
-      card.appendChild(name);
-      card.appendChild(desc);
-      card.appendChild(tags);
-      card.appendChild(stack);
-      this.draftCards.appendChild(card);
-    }
-    this.draftRerolls.textContent = String(game.rerolls);
-    this.draftRerollBtn.disabled = game.rerolls <= 0;
-  }
-
-  _buildListMarkup(player) {
-    const entries = [];
-    for (const id in player.upgradeCounts) {
-      const stacks = player.upgradeCounts[id] || 0;
-      if (!stacks) continue;
-      const up = UPGRADE_BY_ID.get(id);
-      if (!up) continue;
-      entries.push({ name: up.name, stacks, max: up.max, rarity: up.rarity });
-    }
-    entries.sort((a, b) => b.rarity - a.rarity || a.name.localeCompare(b.name));
-    return entries;
+  _statMarks(game) {
+    return [
+      ['MARK', game.mark.name],
+      ['WEAPON', game.player.weapon.name],
+      ['DAMAGE', `${Math.round(game.player.stats.damage * 100)}%`],
+      ['ARMOR', `${Math.round(game.player.stats.armor * 100)}%`],
+      ['CRIT', `${Math.round(game.player.stats.crit * 100)}%`],
+      ['DASH', `${game.player.stats.maxDashCharges} CHARGES`],
+      ['MISSILES', `${Math.round(game.player.stats.missileCount)} / BARRAGE`],
+      ['CALLSIGN', game.player.callsign]
+    ];
   }
 
   showPause(game) {
@@ -345,7 +238,7 @@ export class Hud {
     const stats = [
       ['SCORE', game.score],
       ['TIME', formatTime(game.elapsed)],
-      ['LEVEL', game.level],
+      ['THREAT', game.threat],
       ['COMBO BEST', game.comboBest]
     ];
     this.pauseStats.innerHTML = '';
@@ -361,72 +254,52 @@ export class Hud {
       this.pauseStats.appendChild(div);
     }
 
-    this.pauseBuild.innerHTML = '';
-    const build = this._buildListMarkup(game.player);
-    if (!build.length) {
-      const note = document.createElement('div');
-      note.className = 'empty-note';
-      note.textContent = 'NO MODULES DRAFTED YET';
-      this.pauseBuild.appendChild(note);
-    } else {
-      for (let i = 0; i < build.length; i++) {
+    if (this.pauseLoadout) {
+      this.pauseLoadout.innerHTML = '';
+      const marks = this._statMarks(game);
+      for (let i = 0; i < marks.length; i++) {
         const item = document.createElement('div');
-        item.className = 'build-item';
-        const name = document.createElement('b');
-        name.textContent = build[i].name;
-        const stacks = document.createElement('span');
-        stacks.textContent = `×${build[i].stacks}`;
-        item.appendChild(name);
-        item.appendChild(stacks);
-        this.pauseBuild.appendChild(item);
+        item.className = 'loadout-item';
+        const label = document.createElement('span');
+        label.textContent = marks[i][0];
+        const value = document.createElement('b');
+        value.textContent = marks[i][1];
+        item.appendChild(label);
+        item.appendChild(value);
+        this.pauseLoadout.appendChild(item);
       }
-    }
-
-    this.pauseSynergies.innerHTML = '';
-    const counts = tagCounts(game.player);
-    const tags = Object.keys(SYNERGY_TAGS);
-    for (let i = 0; i < tags.length; i++) {
-      const tag = tags[i];
-      const meta = SYNERGY_TAGS[tag];
-      const count = counts[tag] || 0;
-      const next = SYNERGY_TIERS.filter((t) => t.tag === tag).find((t) => count < t.at);
-      const item = document.createElement('div');
-      item.className = 'synergy-item';
-      item.style.setProperty('--tg', meta.color);
-      const head = document.createElement('div');
-      head.className = 'syn-head';
-      const name = document.createElement('b');
-      name.textContent = meta.name;
-      const value = document.createElement('span');
-      value.textContent = next ? `${count} / ${next.at}` : `${count} MAXED`;
-      head.appendChild(name);
-      head.appendChild(value);
-      item.appendChild(head);
-      const note = document.createElement('small');
-      note.textContent = next ? `NEXT: ${next.name} — ${next.desc}` : 'ALL TIERS ONLINE';
-      item.appendChild(note);
-      this.pauseSynergies.appendChild(item);
+      const rack = document.createElement('div');
+      rack.className = 'loadout-rack';
+      for (let i = 0; i < WEAPONS.length; i++) {
+        const span = document.createElement('span');
+        const weapon = WEAPONS[i];
+        span.textContent = `${weapon.key} ${weapon.short}`;
+        span.style.setProperty('--wc', weapon.color);
+        span.classList.toggle('active', i === game.player.weaponIndex);
+        rack.appendChild(span);
+      }
+      this.pauseLoadout.appendChild(rack);
     }
 
     this.pause.classList.remove('hidden');
   }
 
   hidePause() {
-    this.pause.classList.add('hidden');
+    if (this.pause) this.pause.classList.add('hidden');
   }
 
   showGameOver(game, earned, isRecord) {
     if (!this.gameover) return;
     el('go-score').textContent = String(game.score);
     el('go-time').textContent = formatTime(game.elapsed);
-    el('go-level').textContent = String(game.level);
+    el('go-threat').textContent = String(game.threat);
     el('go-kills').textContent = String(game.kills);
     const bestMult = 1 + Math.min(3, game.comboBest * 0.04);
     el('go-combo').textContent = `${game.comboBest} (${bestMult.toFixed(1)}x)`;
     el('go-dealt').textContent = String(Math.round(game.damageDealt));
     el('go-taken').textContent = String(Math.round(game.damageTaken));
-    el('go-elites').textContent = `${game.elitesKilled} / ${game.bossKills}`;
-    el('go-doctrine').textContent = game.doctrine.name;
+    el('go-bosses').textContent = `${game.bossKills} / ${game.elitesKilled}`;
+    el('go-mark').textContent = game.mark.name;
     el('go-meta').textContent = `+${earned} CR SALVAGED`;
     const record = el('go-record');
     if (record) record.classList.toggle('hidden', !isRecord);
@@ -434,36 +307,25 @@ export class Hud {
     const build = el('go-build');
     if (build) {
       build.innerHTML = '';
-      const modules = this._buildListMarkup(game.player);
-      for (let i = 0; i < modules.length; i++) {
+      for (let i = 0; i < WEAPONS.length; i++) {
         const span = document.createElement('span');
-        span.textContent = `${modules[i].name} ×${modules[i].stacks}`;
+        span.textContent = `${WEAPONS[i].key} ${WEAPONS[i].name}`;
+        span.style.setProperty('--wc', WEAPONS[i].color);
         build.appendChild(span);
-      }
-      const counted = tagCounts(game.player);
-      for (const tag in SYNERGY_TAGS) {
-        if (counted[tag] > 0) {
-          const span = document.createElement('span');
-          span.textContent = `${SYNERGY_TAGS[tag].name} ${counted[tag]}`;
-          span.style.color = SYNERGY_TAGS[tag].color;
-          build.appendChild(span);
-        }
       }
     }
     this.gameover.classList.remove('hidden');
   }
 
   hideGameOver() {
-    this.gameover.classList.add('hidden');
+    if (this.gameover) this.gameover.classList.add('hidden');
   }
 
   hideAllGameplayOverlays() {
-    this.hideDraft();
     this.hidePause();
     this.hideGameOver();
-    this.bossBar.classList.add('hidden');
-    this.bossIntro.classList.add('hidden');
-    this.synergyBanner.classList.add('hidden');
+    if (this.bossBar) this.bossBar.classList.add('hidden');
+    if (this.bossIntro) this.bossIntro.classList.add('hidden');
     document.body.classList.remove('low-hp');
   }
 }

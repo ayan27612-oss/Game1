@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Zero-dependency static server for PROTOCOL: SWARM.
+ * Zero-dependency static server for PROTOCOL: WARFORGE.
  * Usage: node server.js [port]   (or PORT=8080 node server.js)
  */
 import { createServer } from 'node:http';
@@ -124,6 +124,6 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`PROTOCOL: SWARM running at http://${HOST}:${PORT}`);
+  console.log(`PROTOCOL: WARFORGE running at http://${HOST}:${PORT}`);
   console.log('Ctrl+C to stop.');
 });

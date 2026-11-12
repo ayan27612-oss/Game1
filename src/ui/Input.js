@@ -1,4 +1,3 @@
-import { ABILITIES } from '../systems/Abilities.js';
 import { CAM_TILT, screenDirToWorld } from '../engine/Projection.js';
 import { clamp } from '../engine/MathUtils.js';
 
@@ -12,27 +11,42 @@ function isGamepadHostile() {
   }
 }
 
-const TOUCH_DEADZONE = 0.16;
-export const STICK_RADIUS = 58;
-export const DASH_BUTTON_RADIUS = 46;
+const TOUCH_DEADZONE = 0.15;
+export const STICK_RADIUS = 72;
+
+/** Logical 1280x720 touch layout. The touch canvas draws exactly these. */
+export const TOUCH_LAYOUT = {
+  fire: { id: 'fire', x: 1176, y: 604, r: 78, label: 'FIRE' },
+  missile: { id: 'missile', x: 1036, y: 650, r: 56, label: 'MSL' },
+  dash: { id: 'dash', x: 1120, y: 460, r: 62, label: 'DASH' },
+  swap: { id: 'swap', x: 996, y: 516, r: 52, label: 'SWAP' },
+  stick: { id: 'stick', x: 190, y: 600, r: 90, label: 'MOVE' }
+};
+
+function makeStick() {
+  return { id: null, active: false, ox: 0, oy: 0, kx: 0, ky: 0, vx: 0, vy: 0, strength: 0 };
+}
 
 /**
- * Unified keyboard / mouse / touch / gamepad input. The game only consumes
- * semantic actions (move vector, dash edge, ability queue), never raw events.
+ * Unified keyboard / mouse / touch / gamepad input. Gameplay code consumes
+ * semantic actions: movement, aim, trigger, dash, missile, weapon selection.
  */
 export class Input {
-  constructor(target) {
+  constructor(target, view) {
     this.target = target;
+    this.view = view || { w: 1280, h: 720 };
     this.keys = new Set();
-    this.mouse = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5, down: false };
+    this.mouse = { x: this.view.w * 0.5, y: this.view.h * 0.5, down: false };
     this.dashQueued = false;
+    this.missileQueued = false;
+    this.weaponQueued = null;
     this.usingTouch = false;
     this.usingPad = false;
-    this.move = this._makeStick();
-    this.aim = this._makeStick();
-    this.dashBtn = { id: null, pressed: false };
-    this.abilityQueued = [];
-    this.abilityHeld = {};
+    this.move = makeStick();
+    this.aim = makeStick();
+    this.fireHeld = false;
+    this.firePointer = null;
+    this.pressed = { fire: false, missile: false, dash: false, swap: false };
     this.padIndex = -1;
     this.padCount = 0;
     this.padLX = 0;
@@ -46,45 +60,30 @@ export class Input {
     this.padLastPoll = 0;
     this.gamepadDisabled = isGamepadHostile();
 
-    // Polling the Gamepad API before a device has been announced can be
-    // expensive on some embedders and headless runtimes. Wait for the event,
-    // then poll normally. Browser automation environments expose a virtual
-    // input stack that can make GamepadService enumerate devices unsafely, so
-    // they opt out unless a caller explicitly re-enables it.
     if (!this.gamepadDisabled) {
       window.addEventListener('gamepadconnected', () => {
         this.gamepadEnabled = true;
       });
       window.addEventListener('gamepaddisconnected', () => {
-        // Re-arm on the next connection event. Calling getGamepads() inside
-        // the disconnect callback can be unsafe in embedded runtimes.
         this.gamepadEnabled = false;
         this.padUi = { start: false, confirm: false, left: false, right: false };
       });
     }
 
-    window.addEventListener('keydown', (e) => {
-      const ab = ABILITIES.find((a) => a.key === e.code);
-      if (ab) {
-        e.preventDefault();
-        this.abilityQueued.push(ab.id);
-      }
-    });
-
     target.addEventListener('mousemove', (e) => {
       if (this.usingTouch) return;
       this.usingPad = false;
-      const rect = target.getBoundingClientRect();
-      this.mouse.x = e.clientX - rect.left;
-      this.mouse.y = e.clientY - rect.top;
+      const p = this._point(e);
+      this.mouse.x = p.x;
+      this.mouse.y = p.y;
     });
     target.addEventListener('mousedown', (e) => {
       if (this.usingTouch) return;
       this.usingPad = false;
       if (e.button === 0) this.mouse.down = true;
-      const rect = target.getBoundingClientRect();
-      this.mouse.x = e.clientX - rect.left;
-      this.mouse.y = e.clientY - rect.top;
+      const p = this._point(e);
+      this.mouse.x = p.x;
+      this.mouse.y = p.y;
     });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.mouse.down = false;
@@ -96,13 +95,7 @@ export class Input {
     window.addEventListener('pointerup', (e) => this._pointerUp(e));
     window.addEventListener('pointercancel', (e) => this._pointerUp(e));
 
-    window.addEventListener('keydown', (e) => {
-      this.keys.add(e.code);
-      if (e.code === 'Space') {
-        e.preventDefault();
-        this.dashQueued = true;
-      }
-    });
+    window.addEventListener('keydown', (e) => this._keyDown(e));
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
     });
@@ -114,40 +107,26 @@ export class Input {
     this.mouse.down = false;
     this._resetStick(this.move);
     this._resetStick(this.aim);
-    this.dashBtn.id = null;
-    this.dashBtn.pressed = false;
-    this.abilityHeld = {};
-    this.abilityQueued.length = 0;
+    this.fireHeld = false;
+    this.firePointer = null;
+    this.pressed = { fire: false, missile: false, dash: false, swap: false };
     this.dashQueued = false;
+    this.missileQueued = false;
+    this.weaponQueued = null;
   }
 
-  _makeStick() {
-    return { id: null, active: false, ox: 0, oy: 0, kx: 0, ky: 0, vx: 0, vy: 0, strength: 0 };
-  }
-
-  getDashButton() {
+  _point(e) {
+    const rect = this.target.getBoundingClientRect();
+    const w = rect.width || this.view.w;
+    const h = rect.height || this.view.h;
     return {
-      x: window.innerWidth - 72,
-      y: window.innerHeight - 120,
-      r: DASH_BUTTON_RADIUS
+      x: ((e.clientX - rect.left) / w) * this.view.w,
+      y: ((e.clientY - rect.top) / h) * this.view.h
     };
   }
 
-  getAbilityButtons() {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const list = [];
-    for (let i = 0; i < ABILITIES.length; i++) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      list.push({
-        id: ABILITIES[i].id,
-        x: w - 58 - col * 64,
-        y: h - 198 - row * 64,
-        r: 28
-      });
-    }
-    return list;
+  getActionButtons() {
+    return [TOUCH_LAYOUT.swap, TOUCH_LAYOUT.dash, TOUCH_LAYOUT.missile, TOUCH_LAYOUT.fire];
   }
 
   _pointerDown(e) {
@@ -161,31 +140,56 @@ export class Input {
       try { this.target.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     }
 
-    const rect = this.target.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const abilityBtns = this.getAbilityButtons();
-    for (let i = 0; i < abilityBtns.length; i++) {
-      const b = abilityBtns[i];
-      if (Math.hypot(x - b.x, y - b.y) <= b.r * 1.2) {
-        this.abilityQueued.push(b.id);
-        this.abilityHeld[b.id] = e.pointerId;
-        return;
+    const p = this._point(e);
+    const buttons = this.getActionButtons();
+    for (let i = 0; i < buttons.length; i++) {
+      const b = buttons[i];
+      if (Math.hypot(p.x - b.x, p.y - b.y) > b.r * 1.16) continue;
+      this.pressed[b.id] = true;
+      if (b.id === 'fire') {
+        this.fireHeld = true;
+        this.firePointer = e.pointerId;
+      } else if (b.id === 'missile') {
+        this.missileQueued = true;
+      } else if (b.id === 'dash') {
+        this.dashQueued = true;
+      } else if (b.id === 'swap') {
+        this.weaponQueued = 'cycle';
       }
-    }
-
-    const db = this.getDashButton();
-    if (Math.hypot(x - db.x, y - db.y) <= db.r * 1.2) {
-      this.dashBtn.id = e.pointerId;
-      this.dashBtn.pressed = true;
-      this.dashQueued = true;
       return;
     }
 
-    const stick = x < window.innerWidth * 0.5 ? this.move : this.aim;
-    if (stick.id !== null) return;
-    stick.id = e.pointerId;
+    if (p.x < this.view.w * 0.54) {
+      if (this.move.id === null) this._startStick(this.move, e.pointerId, p.x, p.y);
+    } else if (this.aim.id === null) {
+      this._startStick(this.aim, e.pointerId, p.x, p.y);
+    }
+  }
+
+  _pointerMove(e) {
+    if (e.pointerType === 'mouse') return;
+    if (this.firePointer === e.pointerId) return;
+    const p = this._point(e);
+    if (this.move.id === e.pointerId) this._updateStick(this.move, p.x, p.y);
+    else if (this.aim.id === e.pointerId) this._updateStick(this.aim, p.x, p.y);
+  }
+
+  _pointerUp(e) {
+    if (e.pointerType === 'mouse') return;
+    if (this.move.id === e.pointerId) this._resetStick(this.move);
+    if (this.aim.id === e.pointerId) this._resetStick(this.aim);
+    if (this.firePointer === e.pointerId) {
+      this.firePointer = null;
+      this.fireHeld = false;
+      this.pressed.fire = false;
+    }
+    this.pressed.missile = false;
+    this.pressed.dash = false;
+    this.pressed.swap = false;
+  }
+
+  _startStick(stick, id, x, y) {
+    stick.id = id;
     stick.active = true;
     stick.ox = x;
     stick.oy = y;
@@ -194,28 +198,6 @@ export class Input {
     stick.vx = 0;
     stick.vy = 0;
     stick.strength = 0;
-  }
-
-  _pointerMove(e) {
-    if (e.pointerType === 'mouse') return;
-    const rect = this.target.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    if (this.move.id === e.pointerId) this._updateStick(this.move, x, y);
-    else if (this.aim.id === e.pointerId) this._updateStick(this.aim, x, y);
-  }
-
-  _pointerUp(e) {
-    if (e.pointerType === 'mouse') return;
-    if (this.move.id === e.pointerId) this._resetStick(this.move);
-    if (this.aim.id === e.pointerId) this._resetStick(this.aim);
-    if (this.dashBtn.id === e.pointerId) {
-      this.dashBtn.id = null;
-      this.dashBtn.pressed = false;
-    }
-    for (const id in this.abilityHeld) {
-      if (this.abilityHeld[id] === e.pointerId) delete this.abilityHeld[id];
-    }
   }
 
   _updateStick(stick, x, y) {
@@ -253,6 +235,26 @@ export class Input {
     stick.strength = 0;
   }
 
+  _keyDown(e) {
+    const wasDown = this.keys.has(e.code);
+    this.keys.add(e.code);
+    if (e.repeat || wasDown) return;
+
+    if (e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+      e.preventDefault();
+      this.dashQueued = true;
+    } else if (e.code === 'KeyR') {
+      this.missileQueued = true;
+    } else if (e.code === 'KeyQ') {
+      this.weaponQueued = 'cycle';
+    } else if (e.code === 'KeyE') {
+      this.weaponQueued = 'cycle';
+    } else if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3' ||
+      e.code === 'Digit4' || e.code === 'Digit5') {
+      this.weaponQueued = Number(e.code.slice(5)) - 1;
+    }
+  }
+
   isDown(code) {
     return this.keys.has(code);
   }
@@ -271,11 +273,12 @@ export class Input {
     let ry = 0;
     let fire = false;
     let dash = false;
+    let missile = false;
+    let swap = false;
     let start = false;
     let confirm = false;
     let left = false;
     let right = false;
-    const abilities = new Set();
     const nextPrev = [];
 
     for (let i = 0; i < pads.length; i++) {
@@ -304,11 +307,9 @@ export class Input {
       if (edge(9)) start = true;
       if (edge(14)) left = true;
       if (edge(15)) right = true;
-      if (edge(2)) abilities.add('nova');
-      if (edge(3)) abilities.add('shield');
-      if (edge(1)) abilities.add('overdrive');
-      if (edge(4)) abilities.add('timewarp');
-      if (pressed(7) || pressed(5)) fire = true;
+      if (edge(1)) missile = true;
+      if (edge(2)) swap = true;
+      if (pressed(7) || pressed(5) || pressed(6)) fire = true;
 
       for (let n = 0; n < buttons.length; n++) states[n] = pressed(n);
       nextPrev[i] = states;
@@ -317,7 +318,9 @@ export class Input {
     this.padCount = count;
     this.padPrev = nextPrev;
     this.padUi = { start, confirm, left, right };
-    if (count > 0 && (fire || dash || start || confirm || left || right || Math.abs(lx) > 0.18 || Math.abs(ly) > 0.18 || Math.abs(rx) > 0.18 || Math.abs(ry) > 0.18 || abilities.size > 0)) {
+    if (count > 0 && (fire || dash || missile || swap || start || confirm || left || right ||
+      Math.abs(lx) > 0.18 || Math.abs(ly) > 0.18 ||
+      Math.abs(rx) > 0.18 || Math.abs(ry) > 0.18)) {
       this.usingPad = true;
     }
     if (count === 0) {
@@ -343,12 +346,15 @@ export class Input {
     this.padFire = fire;
 
     if (dash) this.dashQueued = true;
-    for (const id of abilities) this.abilityQueued.push(id);
+    if (missile) this.missileQueued = true;
+    if (swap) this.weaponQueued = 'cycle';
   }
 
   getMove() {
-    let x = (this.isDown('KeyD') ? 1 : 0) - (this.isDown('KeyA') ? 1 : 0);
-    let y = (this.isDown('KeyS') ? 1 : 0) - (this.isDown('KeyW') ? 1 : 0);
+    let x = (this.isDown('KeyD') || this.isDown('ArrowRight') ? 1 : 0) -
+      (this.isDown('KeyA') || this.isDown('ArrowLeft') ? 1 : 0);
+    let y = (this.isDown('KeyS') || this.isDown('ArrowDown') ? 1 : 0) -
+      (this.isDown('KeyW') || this.isDown('ArrowUp') ? 1 : 0);
     if (this.move.active) {
       x += this.move.vx;
       y += this.move.vy;
@@ -383,22 +389,26 @@ export class Input {
     return null;
   }
 
-  consumeAbilities() {
-    if (this.abilityQueued.length === 0) return [];
-    const queued = this.abilityQueued.slice();
-    this.abilityQueued.length = 0;
-    return queued;
-  }
-
   isFiring() {
-    return this.mouse.down || this.padFire || (this.aim.active && this.aim.strength > 0.01);
+    return this.mouse.down || this.padFire || this.fireHeld;
   }
 
   consumeDash() {
-    if (this.dashQueued) {
-      this.dashQueued = false;
-      return true;
-    }
-    return false;
+    if (!this.dashQueued) return false;
+    this.dashQueued = false;
+    return true;
+  }
+
+  consumeMissile() {
+    if (!this.missileQueued) return false;
+    this.missileQueued = false;
+    return true;
+  }
+
+  consumeWeapon() {
+    if (this.weaponQueued == null) return null;
+    const value = this.weaponQueued;
+    this.weaponQueued = null;
+    return value;
   }
 }

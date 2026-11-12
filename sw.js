@@ -1,6 +1,6 @@
-/* PROTOCOL: SWARM service worker — offline-first app shell. */
-const VERSION = '2.0.0';
-const CACHE = `protocol-swarm-v${VERSION}`;
+/* PROTOCOL: WARFORGE service worker — offline-first app shell. */
+const VERSION = '2.1.0';
+const CACHE = `protocol-warforge-v${VERSION}`;
 const APP_SHELL = [
   './',
   './index.html',
@@ -19,12 +19,11 @@ const APP_SHELL = [
   './src/entities/Ally.js',
   './src/entities/Enemies.js',
   './src/entities/Player.js',
-  './src/systems/Abilities.js',
   './src/systems/Customization.js',
   './src/systems/Doctrines.js',
   './src/systems/Particles.js',
-  './src/systems/Synergies.js',
   './src/systems/Upgrades.js',
+  './src/systems/Weapons.js',
   './src/ui/Hud.js',
   './src/ui/Input.js',
   './src/ui/Menu.js',
@@ -62,7 +61,7 @@ async function networkFirst(request) {
       || await cache.match('./index.html')
       || await cache.match('./');
     if (cached) return cached;
-    return new Response('PROTOCOL: SWARM is offline and the app shell is not cached.', {
+    return new Response('PROTOCOL: WARFORGE is offline and the app shell is not cached.', {
       status: 503,
       headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }
     });

@@ -1,235 +1,250 @@
 # Architecture
 
-PROTOCOL: SWARM 2.0 is a zero-dependency browser game. It uses native ES
-modules, a single Canvas 2D renderer, and WebAudio. There is no build step,
-bundler, framework, or runtime package.
+PROTOCOL: WARFORGE 2.1 is a zero-dependency browser game built with native ES
+modules, Canvas 2D, and WebAudio. There is no bundler, transpiler, runtime
+framework, or network dependency.
 
-## Design goals
-
-1. **Instant deployment** — static files, any host, no toolchain.
-2. **Deterministic simulation** — fixed 60 Hz updates with interpolated render.
-3. **Testable core** — gameplay systems import cleanly in Node without a DOM.
-4. **Bounded allocations** — pools for bullets, pickups, particles, and
-   enemies; a reused quadtree.
-5. **Graceful enhancement** — gamepad, touch, PWA, and haptics are optional.
-
-## Module map
-
-```
-index.html               DOM shell: HUD, menu tabs, draft, pause, game over
-style.css                design system, responsive layout, reduced-motion rules
-src/main.js              boot, frame loop, UI state machine, wiring
-src/Game.js              simulation core, director, combat, scoring, render world
-src/engine/
-  MathUtils.js           scalar/vector/angle/segment helpers, formatTime
-  Projection.js          camera tilt, aim projection, screen-to-world vectors
-  Quadtree.js            broad-phase spatial index with reused nodes
-  AudioSynth.js          procedural music/SFX, buses, ducking, low-HP state
-src/entities/
-  Player.js              player stats, dash, abilities, heat, damage, revive
-  Ally.js                wingman AI and support fire
-  Enemies.js             enemy roster, elites, bosses, spawn manager
-src/systems/
-  Upgrades.js            module pool, rarity weighting, drafts, save data
-  Synergies.js           tag counting, tier table, activation
-  Doctrines.js           starting frames and unlock rules
-  Abilities.js           ability definitions and key bindings
-  Particles.js           pooled particles, shake, flash, aberration
-  Customization.js       hull/palette data and ship drawing
-src/ui/
-  Input.js               semantic input for keyboard/mouse/touch/gamepad
-  Menu.js                command deck, settings, briefing, hangar
-  Hud.js                 live HUD, draft, pause, game over, banners
-  Touch.js               virtual sticks and touch buttons
-```
-
-`main.js` is the only browser-entry module. Everything under `src/engine`,
-`src/entities`, `src/systems`, and even `src/ui` can be imported in Node for
-tests because DOM access happens inside constructors or methods, not at module
-load time.
-
-## Boot sequence
-
-1. `index.html` loads `src/main.js` as a module.
-2. `main.js` creates the world canvas, offscreen composition canvases, input,
-   audio, save data, HUD, and menu.
-3. The menu is shown. No game simulation exists yet.
-4. Starting a run constructs `Game`, applies meta unlocks and the selected
-   doctrine, then enters the `playing` state.
-5. The service worker registers after `load` when the origin is HTTP(S).
-
-UI state is one of `menu`, `playing`, `levelup`, `paused`, or `gameover`.
-`main.js` owns this state; `Game` never changes UI state directly, it emits
-callbacks (`onLevelUp`, `onGameOver`, `onSynergy`, `onThreat`, `onBoss`).
-
-## Frame loop
-
-`main.js` runs `requestAnimationFrame` and accumulates elapsed time:
+## Module graph
 
 ```text
-poll input
-update quality scaling (auto mode)
-while accumulator >= 1/60 and playing:
-  game.update(1/60)
-  accumulator -= 1/60
-alpha = accumulator / step
-render(alpha)
-update HUD
+index.html
+style.css
+src/
+  main.js                 boot, fixed-stage sizing, state machine, render loop
+  Game.js                 simulation, director, combat, scoring, camera, drawing
+  engine/
+    AudioSynth.js         WebAudio buses, music scheduler, SFX
+    MathUtils.js          angles, lerp, clamp, formatting, RNG helpers
+    Projection.js         camera tilt and screen-to-world direction mapping
+    Quadtree.js           broad-phase enemy indexing
+  entities/
+    Player.js             Iron Man: stats, movement, dash, aim, heat, weapons
+    Ally.js               War Machine: autonomous bursts, missiles, rebuild
+    Enemies.js            swarm roster, elites, bosses, managers
+  systems/
+    Weapons.js            five-weapon rack, projectile patterns, barrage
+    Doctrines.js          armor marks and legacy id normalization
+    Customization.js      armor frames, palettes, procedural armor drawing
+    Particles.js          pooled VFX, shake, flash, aberration, text
+    Upgrades.js           save schema v4, meta unlocks, migrations
+  ui/
+    Input.js              keyboard/mouse/touch/gamepad semantic input
+    Touch.js              touch overlay rendering
+    Hud.js                live suit HUD, pause and run summary
+    Menu.js               command deck, armory, fabricator, settings
 ```
 
-The simulation always advances in fixed 1/60s ticks, capped at five catch-up
-steps to avoid a spiral of death. Rendering interpolates entity previous
-positions using `alpha`, so motion remains smooth on 90/120 Hz displays.
+The browser loads only `main.js`; every other module is imported through the
+ES-module graph.
 
-## Simulation order
+## Boot and lifecycle
 
-`Game.update(dt)` deliberately orders work so queries see consistent state:
+`main.js` owns five responsibilities:
 
-1. Advance elapsed time; decay combo.
-2. Set elite spawn chance from threat/time.
-3. Apply threat escalation.
-4. Snapshot previous positions for render interpolation.
-5. Update player and wingman.
-6. Move camera.
-7. Run the director (spawn waves, specialists, bosses).
-8. Update enemies (slowed by Time Warp).
-9. Rebuild the quadtree from live enemies.
-10. Resolve enemy contact damage.
-11. Update bullets and hits (player and enemy).
-12. Update pickups, orbitals, and singularities.
-13. Update particles/audio state; clean up dead entities.
-14. Record quadtree statistics for telemetry.
+1. **Stage sizing.** The logical game is always **1280×720**. The `#app` element
+   is letterboxed inside `#shell`, capped at **1600×900**, and receives an inline
+   `font-size` of `stageWidth / 128`, so `1em` is exactly ten logical pixels. UI
+   CSS is written in `em` and scales with the stage.
+2. **Renderer sizing.** Canvas backing stores are `stage CSS size × DPR ×
+   qualityScale`, with `view.dpr = canvas.width / 1280`. `worldCanvas` and the
+   chromatic-aberration channel canvas match the main canvas. Auto quality
+   lowers or restores `resolutionScale` based on smoothed FPS.
+3. **State machine.** States are `menu`, `playing`, `paused`, and `gameover`.
+   `Menu` owns the briefing overlay and starts a run through its `onStart`
+   callback. There is no level-up or draft state.
+4. **UI wiring.** Buttons for pause, resume, abort, retry, mute, scanlines, and
+   fullscreen are bound in `main.js` and `Menu.js`. The debug handle is exposed as
+   `window.__PROTOCOL_WARFORGE__` with `?debug`.
+5. **Fixed-step simulation.** The loop accumulates frame time and runs
+   `game.update(1/60)` up to five times per frame, then renders with an
+   interpolation alpha. Rendering draws into `worldCanvas`, then composites with
+   shake, aberration, and flash onto the visible canvas.
 
-Player bullets use swept segment queries (`lineCircle`) against quadtree
-candidates, preventing tunneling at high projectile speeds.
+`Game` receives `view`, `input`, `audio`, `save`, `mark`, `settings`, and three
+callbacks: `onGameOver`, `onThreat`, and `onBoss`. It never touches the DOM.
 
-## Rendering pipeline
+## Fixed-stage input mapping
 
-The renderer composes into two offscreen canvases:
+`Input` is constructed with the visible canvas and the logical `view`. Pointer
+coordinates are converted through `getBoundingClientRect()` into 1280×720 space,
+so touch hit-testing and the touch overlay share one coordinate system
+regardless of CSS scale or DPR.
 
-1. **World canvas** — background grid, arena, pickups, particles, enemies,
-   bullets, player, wingman, and world-space effects.
-2. **Channel canvas** — used for cheap RGB channel separation when the
-   aberration effect is active.
+Semantic actions:
 
-The final canvas then applies:
+- `getMove()` — normalized world-space movement from keys, touch stick, or pad.
+- `getAimDir()` — optional right-stick or right-thumb direction; `null` means the
+  player should auto-aim or use the mouse.
+- `isFiring()` — mouse, pad trigger, or touch FIRE.
+- `consumeDash()`, `consumeMissile()`, `consumeWeapon()` — edge-triggered actions.
+- `mouse` — logical mouse position used for keyboard/mouse aim.
 
-- camera shake offset,
-- optional additive aberration,
-- full-screen hit flash,
-- optional telemetry overlay,
-- touch controls on a separate transparent canvas.
+Touch layout is defined once in `TOUCH_LAYOUT` (logical coordinates) and is used
+by both hit-testing and `Touch.js` rendering:
 
-The camera uses `CAMERA_ZOOM = 0.92` and `CAM_TILT = 0.72`. Vertical screen
-movement is divided by the tilt when converting to world space, which keeps aim
-and movement visually aligned.
+| Control | Position | Radius |
+| --- | --- | --- |
+| FIRE | 1176, 604 | 78 |
+| MSL | 1036, 650 | 56 |
+| DASH | 1120, 460 | 62 |
+| SWAP | 996, 516 | 52 |
+| MOVE hint | 190, 600 | 90 |
 
-CSS handles scanlines, vignette, glass panels, and reduced motion. The "quality"
-setting scales only internal resolution; UI remains at device resolution.
+The left stick is floating: a touch anywhere in the left 54% of the stage starts
+it. A touch in the right half that misses an action button starts the optional
+aim stick. Auto-aim and auto-fire are on by default for touch and gamepad and can
+be disabled in Settings.
 
-## Input model
+## Simulation model
 
-`Input` exposes semantic actions rather than raw events:
+`Game` owns:
 
-- `getMove()` — normalized world-space movement vector
-- `getAim()` / `aimAngle` — aim target
-- `isFiring()`
-- `consumeDash()`
-- `consumeAbilities()`
-- `padUi` — edge-triggered menu navigation
+- World bounds, camera, projection, and the quadtree.
+- Pools for bullets, enemy bullets, and pickups.
+- The director: threat, spawn cadence, elites, and bosses.
+- Combat resolution: bullet collisions, chains, splash, crits, combo, damage
+  totals, and pickups.
+- Scoring and `finalizeRun()`.
 
-Keyboard, mouse, touch, and gamepad feed the same interface. Gamepad polling is
-deferred until a `gamepadconnected` event. It is forcibly disabled in
-`navigator.webdriver`, headless Chrome, and `?nogamepad` environments where
-enumeration can crash embedded Chromium.
+`Player` is a thin weapons platform. Its `stats` are multipliers and utility
+values, while weapon cards own base damage, rate, heat, and projectile shape.
+This keeps armor marks, meta unlocks, and weapons independent of one another.
 
-## Entity and collision model
+`Weapons.js` exposes:
 
-- Enemies, bullets, pickups, and particles are pooled or preallocated.
-- The quadtree is rebuilt each tick from live enemies; node structure is reused.
-- Queries inflate by `Quadtree.MAX_RADIUS` to account for moving enemies between
-  rebuilds, then perform exact circle tests on candidates.
-- Bosses and elites are ordinary enemies with additional flags, phases, and
-  draw/update branches.
+- `WEAPONS` — five ordered weapon definitions with `id`, `name`, `short`, `key`,
+  `color`, `desc`, `fireRate`, `heat`, `recoil`, and `fire(player, game, angle)`.
+- `WEAPON_BY_ID` — lookup map.
+- `fireWeapon(player, game, angle)` — fires the active weapon and applies heat,
+  recoil, cooldown, and overheat.
+- `MISSILE_BARRAGE` and `fireBarrage(player, game, angle)` — cooldown-gated
+  homing volley.
 
-## Progression and persistence
+`Player.update()` consumes input, moves and clamps the suit, updates aim, fires,
+launches barrages, cools heat, updates ghosts, and emits thruster trails.
+`Player.draw()` delegates to `Customization.drawArmorBody()`.
 
-`src/systems/Upgrades.js` owns the module table and save schema.
+`Ally` (War Machine) is fully autonomous: it selects targets, closes to range,
+fires minigun bursts, launches shoulder missiles, takes contact damage, and
+rebuilds eight seconds after being downed.
 
-- Modules are data objects with rarity, max stacks, tags, and an `apply`
-  function that mutates player stats.
-- `draftUpgrades(player, count, level)` filters maxed modules, weights by
-  rarity/level, and applies a small repeat-tag penalty for diversity.
-- `SaveData` sanitizes every field loaded from `localStorage`. Save schema is
-  version 3, stored under `protocol_swarm_save_v2`; legacy v1 data migrates.
-- Career aggregates (`runs`, `totalScore`, `totalKills`, `totalTime`,
-  `bestCombo`, `bestLevel`) update when a run is finalized.
-- Run finalization is idempotent, so game-over and abort paths cannot double
-  award credits.
+## Armor marks
+
+`Doctrines.js` exports `ARMOR_MARKS` and helpers:
+
+- `getArmorMark(id)` — normalized lookup, always returns a mark.
+- `normalizeMarkId(id)` — maps legacy doctrine ids (`vanguard`, `lancer`,
+  `warden`, `phantom`) onto the new marks.
+- `isArmorMarkUnlocked(mark, save)` — checks the mark's Fabricator unlock.
+- `armorMarkSummary(mark)` — joins bonus lines for UI.
+
+The four marks are Mark III (balanced), Mark XLII (strike), Hulkbuster (siege),
+and Bleeding Edge (prototype, locked behind `armor_bleeding_edge`).
+
+`Game` applies meta unlocks first, then the selected mark, then clamps hull to a
+minimum and refills it. Locked marks fall back to Mark III.
+
+## Save schema v4
+
+`Upgrades.js` owns persistence:
+
+- **Key:** `protocol_warforge_save_v3`
+- **Legacy keys:** `protocol_swarm_save_v2`, `protocol_swarm_save_v1`
+- **Version:** `4`
+
+Fields include currency, top-eight score records, unlocks, career aggregates,
+ship cosmetics/callsign, selected mark, settings, briefing flag, and
+achievements. Loading sanitizes every field: numeric ranges, unlock strings,
+score records, callsign characters, settings, and mark ids. Legacy `doctrine`
+fields, `level` score fields, and `doctrine_phantom` unlock ids migrate
+automatically.
+
+`finalizeRun()` computes salvage, adds currency, appends a score record with
+`threat` and `mark`, and is idempotent.
 
 ## Audio
 
-`AudioSynth` builds all music and SFX procedurally with oscillators and noise.
-It exposes separate music and SFX gain buses, mute, ducking (draft/pause), and a
-low-HP tension layer. Audio initialization is deferred until a user gesture to
-satisfy browser autoplay policies. No audio files are loaded.
+`AudioSynth` creates a master compressor, separate music and SFX buses, a lead
+delay, and a noise buffer after the first user gesture. The music scheduler is a
+25ms interval that schedules steps ahead of the audio clock. SFX are synthesized
+per event: repulsor, unibeam, micro missiles, arc, scatter, missile barrage,
+minigun, overheat, explosions, impacts, pickups, UI, boss, and game-over cues.
+Low hull raises the music tempo; pausing ducks the music bus.
 
-## PWA and offline behavior
+## UI contract
 
-`sw.js` precaches the app shell with a versioned cache name. Navigation uses
-network-first with an offline `index.html` fallback; static assets use
-stale-while-revalidate. Old caches are deleted on activation.
+`Hud` reads simulation state and updates DOM ids from `index.html`:
 
-Release checklist for new modules:
+- Suit integrity, callsign, mark, heat, dash pips, missile status.
+- Weapon rack, combo chip, threat chip, score/time/kills/bosses.
+- War Machine status and boss bar.
+- Pause loadout and post-run summary.
 
-1. Add the runtime file to `APP_SHELL` in `sw.js`.
-2. Bump `VERSION` in `sw.js`.
-3. Run `npm run check` to verify every precached path exists.
-4. Deploy.
+`Menu` owns the five-tab command deck:
 
-## Failure handling
+- Deploy: armor-mark cards, best score, launch, briefing, fullscreen.
+- Armory: procedural armor preview, frame/palette/ally/War Machine paint,
+  callsign, weapon primer.
+- Fabricator: permanent unlocks and career record.
+- Archive: run history and field record.
+- Settings: audio, auto-fire, visuals, quality, reset save.
 
-- Missing storage (private mode, quota) falls back to an in-memory save object.
-- Corrupt JSON falls back to a fresh save.
-- Service worker failure is non-fatal; the game remains playable online.
-- Gamepad absence or disabled polling simply hides that input path.
-- Audio context failures are isolated; gameplay continues silently.
+Neither class runs simulation code; both are driven by callbacks and save data.
 
-## Testing strategy
+## Performance and rendering
 
-- **Pure systems** — save migration/sanitization, draft weighting, synergy
-  activation, math, and quadtree behavior.
-- **Game lifecycle** — construction, doctrine/meta application, reroll caps,
-  pending level-ups, finalization idempotence, and death callbacks.
-- **Module imports** — every runtime ES module is imported in Node to catch
-  broken import graphs and top-level DOM assumptions.
-- **Static checks** — `scripts/check.mjs` runs `node --check` over every script,
-  validates JSON manifests, and verifies service-worker precache coverage.
+- Fixed logical stage with adaptive canvas backing resolution.
+- Pooled bullets, enemy bullets, pickups, particles, and enemies.
+- Quadtree broad phase and reused candidate arrays.
+- Interpolated render positions for smooth motion at fixed simulation steps.
+- Reduced-motion and screen-shake settings scale particle effects.
+- Telemetry (`F`) reports FPS, frame time, entity counts, particle pressure, and
+  quadtree query/node counts.
 
-Browser smoke tests are performed manually or with Playwright against
-`?debug`; they are intentionally not part of CI to keep the repository
-dependency-free.
+## Testing
 
-## Extension guide
+`node:test` suites run directly against the browser modules:
 
-### Add an enemy
+- **`test/engine.test.js`** — math, angle wrapping, line-circle intersection,
+  projection, and quadtree behavior.
+- **`test/game.test.js`** — armor-mark profiles, meta unlocks, weapon firing,
+  cycling, barrage cooldown, overheat, dash, finalization, and death callbacks.
+- **`test/save.test.js`** — schema defaults, legacy migration, sanitization,
+  career aggregates, purchases, and reset.
+- **`test/modules.test.js`** — clean imports for every runtime module and API
+  surface checks for marks, weapons, upgrades, and input layout.
 
-1. Subclass `Enemy` in `src/entities/Enemies.js`.
-2. Implement `update(dt, game)` and `draw(ctx)`.
-3. Register the type in `EnemyManager.spawn()`.
-4. Add director scheduling in `Game.director()`.
-5. Tune score/XP and elite eligibility.
+`npm run check` additionally syntax-checks every `.js`/`.mjs` file, validates
+JSON, checks manifest icons, and verifies every `sw.js` precache path exists.
 
-### Add a module
+## Adding content
 
-1. Append to `UPGRADES` with a unique id, rarity, max, tags, description, and
-   `apply` callback.
-2. If it introduces a new tag, add metadata and tiers in `Synergies.js`.
-3. Draft and HUD rendering pick it up automatically.
-4. Add a unit test if the apply behavior is non-trivial.
+### Add a weapon
 
-### Add a doctrine
+1. Append a weapon object to `WEAPONS` in `src/systems/Weapons.js` with a unique
+   `id` and key, heat cost, fire rate, and a `fire()` pattern using `spawnRound`
+   or `game.spawnPlayerBullet()`.
+2. Give it a HUD color and short label.
+3. Add a synthesized sound method if it needs a distinct cue.
+4. Extend `test/modules.test.js` only if the rack shape changes.
 
-1. Append to `DOCTRINES` with id, name, role, color, bonuses, and `apply`.
-2. If locked, add a matching Meta Lab unlock with the same `unlock` id.
-3. The menu picker, save validation, and run setup read from the table.
+### Add an armor mark
+
+1. Append to `ARMOR_MARKS` with an `id`, name, role, color, description, bonus
+   strings, and an `apply(player)` function.
+2. Add a legacy alias in `LEGACY_MARK_MAP` if it replaces an old id.
+3. Add an unlock entry to `META_UNLOCKS` if it should be purchasable.
+4. Update the README and gameplay tables.
+
+### Add a Fabricator unlock
+
+1. Append to `META_UNLOCKS` with `id`, `name`, `desc`, `cost`, and `apply(player)`.
+2. The menu renders it automatically and `Game` applies owned unlocks at boot.
+3. Add a save test if the unlock changes schema or migration behavior.
+
+### Add a runtime module
+
+1. Add the file under `src/`.
+2. Add it to `APP_SHELL` in `sw.js` and bump `VERSION`.
+3. Import it from the owning module.
+4. Run `npm test` and `npm run check`.
