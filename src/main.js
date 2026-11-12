@@ -7,6 +7,17 @@ import { Hud } from './ui/Hud.js';
 import { drawTouchControls } from './ui/Touch.js';
 import { clamp } from './engine/MathUtils.js';
 
+/* ------------------------------------------------------------------ */
+/* fixed 16:9 stage                                                   */
+/* ------------------------------------------------------------------ */
+
+const STAGE_W = 1280;
+const STAGE_H = 720;
+const STAGE_MAX_W = 1600;
+const STAGE_MAX_H = 900;
+
+const shell = document.getElementById('shell');
+const app = document.getElementById('app');
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
 const touchCanvas = document.getElementById('touch-layer');
@@ -16,16 +27,15 @@ const wctx = worldCanvas.getContext('2d', { desynchronized: true });
 const channelCanvas = document.createElement('canvas');
 const chCtx = channelCanvas.getContext('2d');
 
-const view = { w: window.innerWidth, h: window.innerHeight, dpr: 1 };
-const input = new Input(canvas);
+const view = { w: STAGE_W, h: STAGE_H, dpr: 1 };
+const input = new Input(canvas, view);
 const audio = new AudioSynth();
 const save = SaveData.load(storage());
+
 let game = null;
 let state = 'menu';
 let alpha = 1;
 let telemetry = false;
-let draftChoices = [];
-let padDraftIndex = 0;
 let resolutionScale = 1;
 
 const STEP = 1000 / 60;
@@ -36,11 +46,7 @@ let frameMsSmooth = 16.7;
 let lastQualityCheck = 0;
 let lastQualityDrop = 0;
 
-const hud = new Hud({
-  audio,
-  onChoose: (index) => chooseDraft(index),
-  onReroll: () => rerollDraft()
-});
+const hud = new Hud({ audio });
 
 const menu = new Menu({
   save,
@@ -77,30 +83,66 @@ function qualityScale() {
 }
 
 function resize() {
-  const cap = (save.settings.quality === 'low' ? 1.25 : 2);
-  const dpr = Math.min(cap, window.devicePixelRatio || 1) * qualityScale();
-  view.dpr = dpr;
-  view.w = window.innerWidth;
-  view.h = window.innerHeight;
-  canvas.width = Math.max(1, Math.floor(view.w * dpr));
-  canvas.height = Math.max(1, Math.floor(view.h * dpr));
-  worldCanvas.width = canvas.width;
-  worldCanvas.height = canvas.height;
-  channelCanvas.width = canvas.width;
-  channelCanvas.height = canvas.height;
+  const vw = Math.max(1, window.innerWidth || document.documentElement.clientWidth || STAGE_W);
+  const vh = Math.max(1, window.innerHeight || document.documentElement.clientHeight || STAGE_H);
+
+  // Letterbox a locked 16:9 stage inside the window, capped at 1600x900.
+  let stageScale = Math.min(vw / STAGE_W, vh / STAGE_H, STAGE_MAX_W / STAGE_W);
+  stageScale = Math.max(0.16, stageScale);
+  const stageW = Math.max(1, Math.floor(STAGE_W * stageScale));
+  const stageH = Math.max(1, Math.round(stageW * (STAGE_H / STAGE_W)));
+
+  app.style.width = `${stageW}px`;
+  app.style.height = `${stageH}px`;
+  // 1em === 10 logical pixels on the 1280x720 render target.
+  app.style.fontSize = `${stageW / 128}px`;
+
+  const dprCap = save.settings.quality === 'low' ? 1.25 : 2;
+  const pixelRatio = Math.min(dprCap, window.devicePixelRatio || 1) * qualityScale();
+  const backingW = Math.max(1, Math.floor(stageW * pixelRatio));
+  const backingH = Math.max(1, Math.round(backingW * (STAGE_H / STAGE_W)));
+
+  view.dpr = backingW / STAGE_W;
+  canvas.width = backingW;
+  canvas.height = backingH;
+  worldCanvas.width = backingW;
+  worldCanvas.height = backingH;
+  channelCanvas.width = backingW;
+  channelCanvas.height = backingH;
   if (touchCanvas) {
-    touchCanvas.width = canvas.width;
-    touchCanvas.height = canvas.height;
+    touchCanvas.width = backingW;
+    touchCanvas.height = backingH;
   }
+  ctx.imageSmoothingEnabled = true;
   if (game) game._clampCamera();
 }
 
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 160));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', resize);
+}
 resize();
 
 /* ------------------------------------------------------------------ */
 /* boot / lifecycle                                                   */
 /* ------------------------------------------------------------------ */
+
+function requestImmersive() {
+  const root = document.documentElement;
+  if (!document.fullscreenElement && root && root.requestFullscreen) {
+    root.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => {
+        if (screen.orientation && screen.orientation.lock) {
+          return screen.orientation.lock('landscape').catch(() => {});
+        }
+        return null;
+      })
+      .catch(() => {});
+  } else if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock('landscape').catch(() => {});
+  }
+}
 
 function startGame() {
   audio.init();
@@ -112,17 +154,10 @@ function startGame() {
 
   menu.hide();
   menu.hideBriefing();
-  hud.hideGameOver();
-  hud.hidePause();
-  hud.hideDraft();
+  hud.hideAllGameplayOverlays();
   hud.showHud();
-  hud.bossBar.classList.add('hidden');
-  hud.bossIntro.classList.add('hidden');
-  hud.synergyBanner.classList.add('hidden');
   document.body.classList.remove('low-hp');
 
-  draftChoices = [];
-  padDraftIndex = 0;
   state = 'playing';
   accumulator = 0;
   alpha = 1;
@@ -136,81 +171,17 @@ function startGame() {
     input,
     audio,
     save,
-    doctrine: save.doctrine,
+    mark: save.mark,
     settings: save.settings,
-    onLevelUp: handleLevelUp,
     onGameOver: handleGameOver,
-    onSynergy: handleSynergy,
     onThreat: handleThreat,
     onBoss: handleBoss
   });
 
+  requestImmersive();
+
   hud.update(game, state, performance.now());
-  hud.toast(`PROTOCOL INITIALIZED // ${game.doctrine.name}`);
-}
-
-function handleLevelUp() {
-  if (!game) return;
-  state = 'levelup';
-  padDraftIndex = 0;
-  input.reset();
-  audio.duckMusic(true);
-  draftChoices = game.createDraft();
-  hud.showDraft(game, draftChoices);
-  updateDraftPadHighlight();
-}
-
-function chooseDraft(index) {
-  if (state !== 'levelup' || !game) return;
-  const up = draftChoices[index];
-  if (!up) return;
-  audio.select();
-  hud.hideDraft();
-  const remaining = game.applyChosen(up.id);
-  draftChoices = [];
-  if (remaining > 0) {
-    state = 'levelup';
-    draftChoices = game.createDraft();
-    hud.showDraft(game, draftChoices);
-    updateDraftPadHighlight();
-  } else {
-    state = 'playing';
-    input.reset();
-    accumulator = 0;
-    alpha = 1;
-    audio.duckMusic(false);
-    hud.toast(`${up.name.toUpperCase()} ONLINE`);
-  }
-}
-
-function rerollDraft() {
-  if (state !== 'levelup' || !game) return;
-  const choices = game.rerollDraft();
-  if (!choices) {
-    hud.toast('NO REROLLS REMAINING');
-    audio.ui();
-    return;
-  }
-  draftChoices = choices;
-  padDraftIndex = 0;
-  hud.showDraft(game, draftChoices);
-  updateDraftPadHighlight();
-  hud.toast(`DRAFT REROLLED // ${game.rerolls} LEFT`);
-}
-
-function updateDraftPadHighlight() {
-  if (!hud.draftCards) return;
-  const cards = hud.draftCards.querySelectorAll('.draft-card');
-  for (let i = 0; i < cards.length; i++) {
-    cards[i].classList.toggle('pad-active', i === padDraftIndex);
-  }
-}
-
-function handleSynergy(activated) {
-  if (!activated || !activated.length) return;
-  for (let i = 0; i < activated.length; i++) hud.showSynergy(activated[i]);
-  const names = activated.map((t) => t.name).join(' + ');
-  hud.toast(`SYNERGY ONLINE // ${names}`, 2300);
+  hud.toast(`SUIT ONLINE // ${game.mark.name}`, 2200);
 }
 
 function handleThreat(level) {
@@ -219,7 +190,7 @@ function handleThreat(level) {
 
 function handleBoss(boss) {
   hud.showBossIntro(boss);
-  hud.toast(`WARNING // ${boss.name || 'SECTOR GUARDIAN'}`, 2400);
+  hud.toast(`WARNING // ${boss.name || 'HEAVY UNIT'}`, 2400);
 }
 
 function pauseGame() {
@@ -255,10 +226,9 @@ function handleGameOver() {
   state = 'gameover';
   audio.stopMusic();
   document.body.classList.remove('low-hp');
-  hud.hideDraft();
   hud.hidePause();
   hud.hideHud();
-  hud.bossBar.classList.add('hidden');
+  if (hud.bossBar) hud.bossBar.classList.add('hidden');
   hud.showGameOver(game, earned, isRecord);
   menu.refresh();
 }
@@ -268,12 +238,7 @@ function backToMenu() {
   state = 'menu';
   game = null;
   hud.hideHud();
-  hud.hideGameOver();
-  hud.hidePause();
-  hud.hideDraft();
-  hud.bossBar.classList.add('hidden');
-  hud.bossIntro.classList.add('hidden');
-  hud.synergyBanner.classList.add('hidden');
+  hud.hideAllGameplayOverlays();
   document.body.classList.remove('low-hp');
   menu.show();
   menu.refresh();
@@ -281,7 +246,7 @@ function backToMenu() {
 }
 
 function abortRun() {
-  if (game && !game.over) {
+  if (game && !game.finalized) {
     const earned = game.finalizeRun();
     hud.toast(`RUN ABORTED // +${earned} CR SALVAGED`, 2300);
   }
@@ -355,26 +320,22 @@ document.getElementById('btn-pause-scan').addEventListener('click', toggleScanli
 document.getElementById('btn-scan').addEventListener('click', toggleScanlines);
 document.getElementById('btn-mute').addEventListener('click', toggleMute);
 
-document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('pointerup', () => audio.select());
-});
-
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
   const tag = e.target && e.target.tagName;
   const typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
 
   if (e.code === 'Escape' || e.code === 'KeyP') {
-    if (!typing) {
-      if (!document.getElementById('briefing').classList.contains('hidden')) {
-        menu.hideBriefing();
-        e.preventDefault();
-        return;
-      }
-      if (state === 'playing' || state === 'paused') {
-        e.preventDefault();
-        togglePause();
-      }
+    if (typing) return;
+    const briefing = document.getElementById('briefing');
+    if (briefing && !briefing.classList.contains('hidden')) {
+      menu.hideBriefing();
+      e.preventDefault();
+      return;
+    }
+    if (state === 'playing' || state === 'paused') {
+      e.preventDefault();
+      togglePause();
     }
     return;
   }
@@ -396,13 +357,6 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') { toggleScanlines(); return; }
   if (e.code === 'KeyM') { toggleMute(); return; }
 
-  if (state === 'levelup') {
-    if (e.code === 'Digit1') chooseDraft(0);
-    else if (e.code === 'Digit2') chooseDraft(1);
-    else if (e.code === 'Digit3') chooseDraft(2);
-    else if (e.code === 'Digit4') rerollDraft();
-    return;
-  }
   if (state === 'gameover' && (e.code === 'Enter' || e.code === 'Space')) {
     e.preventDefault();
     startGame();
@@ -433,19 +387,8 @@ function handlePadUi() {
   if (!ui) return;
   if (ui.start) {
     if (state === 'menu') menu.requestStart();
-    else if (state === 'gameover') startGame();
     else if (state === 'playing' || state === 'paused') togglePause();
-    else if (state === 'levelup') { /* keep drafting */ }
-    return;
-  }
-  if (state === 'levelup' && draftChoices.length > 0) {
-    if (ui.left || ui.right) {
-      const count = draftChoices.length;
-      padDraftIndex = (padDraftIndex + (ui.right ? 1 : count - 1)) % count;
-      updateDraftPadHighlight();
-      audio.ui();
-    }
-    if (ui.confirm) chooseDraft(padDraftIndex);
+    else if (state === 'gameover') startGame();
     return;
   }
   if (ui.confirm && (state === 'menu' || state === 'gameover')) {
@@ -461,77 +404,105 @@ function handlePadUi() {
 function drawMenuBackdrop(now) {
   const t = now * 0.001;
   const dpr = view.dpr;
+  const w = view.w;
+  const h = view.h;
+
+  wctx.setTransform(1, 0, 0, 1, 0, 0);
+  wctx.clearRect(0, 0, worldCanvas.width, worldCanvas.height);
   wctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  wctx.clearRect(0, 0, view.w, view.h);
 
-  const sky = wctx.createLinearGradient(0, 0, 0, view.h);
-  sky.addColorStop(0, '#05000f');
-  sky.addColorStop(0.55, '#120627');
-  sky.addColorStop(1, '#1b0626');
+  const sky = wctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, '#04060b');
+  sky.addColorStop(0.52, '#0a101c');
+  sky.addColorStop(1, '#1a100c');
   wctx.fillStyle = sky;
-  wctx.fillRect(0, 0, view.w, view.h);
+  wctx.fillRect(0, 0, w, h);
 
-  const cx = view.w * 0.5;
-  const horizon = view.h * 0.62;
-  const sunR = Math.min(view.w, view.h) * 0.24;
+  const cx = w * 0.5;
+  const horizon = h * 0.64;
+  const sunR = Math.min(w, h) * 0.22;
 
+  // Arc-reactor halo.
   wctx.save();
   wctx.globalCompositeOperation = 'lighter';
-  const sun = wctx.createRadialGradient(cx, horizon - sunR * 0.35, 10, cx, horizon - sunR * 0.35, sunR * 1.7);
-  sun.addColorStop(0, 'rgba(255, 90, 170, 0.5)');
-  sun.addColorStop(0.45, 'rgba(255, 47, 142, 0.18)');
-  sun.addColorStop(1, 'rgba(139, 92, 255, 0)');
-  wctx.fillStyle = sun;
-  wctx.fillRect(cx - sunR * 2, horizon - sunR * 2, sunR * 4, sunR * 4);
+  const halo = wctx.createRadialGradient(cx, horizon - sunR * 0.35, 8, cx, horizon - sunR * 0.35, sunR * 2);
+  halo.addColorStop(0, 'rgba(216, 251, 255, 0.5)');
+  halo.addColorStop(0.32, 'rgba(143, 232, 255, 0.16)');
+  halo.addColorStop(0.62, 'rgba(255, 183, 71, 0.1)');
+  halo.addColorStop(1, 'rgba(181, 18, 27, 0)');
+  wctx.fillStyle = halo;
+  wctx.fillRect(cx - sunR * 2.4, horizon - sunR * 2.4, sunR * 4.8, sunR * 4.8);
   wctx.restore();
 
+  // Gold reactor disc behind the skyline.
   wctx.save();
   wctx.beginPath();
   wctx.arc(cx, horizon - sunR * 0.35, sunR, 0, Math.PI * 2);
   wctx.clip();
   const disc = wctx.createLinearGradient(0, horizon - sunR * 1.4, 0, horizon + sunR * 0.7);
-  disc.addColorStop(0, '#ffd36b');
-  disc.addColorStop(0.55, '#ff5f9e');
-  disc.addColorStop(1, '#8b5cff');
+  disc.addColorStop(0, '#fff6c6');
+  disc.addColorStop(0.5, '#ffb347');
+  disc.addColorStop(1, '#b5121b');
   wctx.fillStyle = disc;
   wctx.fillRect(cx - sunR, horizon - sunR * 1.4, sunR * 2, sunR * 2.2);
-  wctx.fillStyle = 'rgba(5, 0, 15, 0.85)';
+  wctx.fillStyle = 'rgba(5, 7, 13, 0.82)';
   for (let i = 0; i < 9; i++) {
     const y = horizon - sunR * 0.35 + i * 11;
     wctx.fillRect(cx - sunR, y, sunR * 2, 2 + i * 0.8);
   }
   wctx.restore();
 
+  // Perspective hangar grid.
   wctx.save();
-  wctx.strokeStyle = 'rgba(255, 47, 142, 0.32)';
+  wctx.strokeStyle = 'rgba(255, 183, 71, 0.26)';
   wctx.lineWidth = 1;
   for (let i = -24; i <= 24; i++) {
     wctx.beginPath();
     wctx.moveTo(cx + i * 6, horizon);
-    wctx.lineTo(cx + i * 120, view.h + 20);
+    wctx.lineTo(cx + i * 120, h + 20);
     wctx.stroke();
   }
-  wctx.strokeStyle = 'rgba(139, 92, 255, 0.28)';
+  wctx.strokeStyle = 'rgba(143, 232, 255, 0.22)';
   const scroll = (t * 0.55) % 1;
   for (let i = 0; i < 18; i++) {
     const z = (i + scroll) / 18;
-    const y = horizon + Math.pow(z, 2.4) * (view.h - horizon + 40);
-    wctx.globalAlpha = 0.15 + z * 0.4;
+    const y = horizon + Math.pow(z, 2.4) * (h - horizon + 40);
+    wctx.globalAlpha = 0.12 + z * 0.34;
     wctx.beginPath();
     wctx.moveTo(0, y);
-    wctx.lineTo(view.w, y);
+    wctx.lineTo(w, y);
     wctx.stroke();
   }
   wctx.globalAlpha = 1;
   wctx.restore();
 
-  wctx.fillStyle = 'rgba(255, 47, 142, 0.12)';
-  wctx.fillRect(0, horizon, view.w, 1);
+  wctx.fillStyle = 'rgba(255, 183, 71, 0.16)';
+  wctx.fillRect(0, horizon, w, 1);
+
+  // Distant Stark tower silhouette.
+  wctx.save();
+  wctx.fillStyle = 'rgba(4, 6, 11, 0.72)';
+  const baseY = horizon + 2;
+  const towers = [
+    [cx - 250, 46, 120],
+    [cx - 160, 68, 90],
+    [cx - 40, 54, 150],
+    [cx + 70, 80, 70],
+    [cx + 160, 40, 110],
+    [cx + 240, 58, 60]
+  ];
+  for (let i = 0; i < towers.length; i++) {
+    const [x, tw, th] = towers[i];
+    wctx.fillRect(x - tw * 0.5, baseY - th, tw, th);
+    wctx.fillStyle = i % 2 ? 'rgba(143, 232, 255, 0.5)' : 'rgba(255, 183, 71, 0.55)';
+    wctx.fillRect(x - 1, baseY - th - 6, 2, 6);
+    wctx.fillStyle = 'rgba(4, 6, 11, 0.72)';
+  }
+  wctx.restore();
 }
 
 function drawAberration(intensity) {
-  const dpr = view.dpr;
-  const off = (2 + intensity * 4) * dpr;
+  const off = (2 + intensity * 4) * view.dpr;
   const W = worldCanvas.width;
   const H = worldCanvas.height;
   const a = Math.min(0.5, 0.3 * intensity);
@@ -564,19 +535,20 @@ function drawTelemetry() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const x = 16;
   const y = 146;
-  const w = 260;
+  const w = 304;
   const lines = [
     `FPS ${fpsSmooth.toFixed(0)}  FRAME ${frameMsSmooth.toFixed(2)}ms  SCALE ${view.dpr.toFixed(2)}`,
     `ENTITIES ${game.activeEntities()}`,
     `BULLETS ${game.bullets.active}/${game.bullets.size} + ${game.enemyBullets.active}/${game.enemyBullets.size}`,
     `PARTICLES ${game.particles.activeCount}/2400 (${(game.particles.utilization * 100).toFixed(0)}%)`,
     `QT QUERIES ${game.quadtreeQueries}  NODES ${game.quadtreeNodes}`,
-    `THREAT ${game.threat}  COMBO ${game.combo}  REROLLS ${game.rerolls}`,
+    `THREAT ${game.threat}  COMBO ${game.combo}  BEST ${game.comboBest}`,
+    `MARK ${game.mark.name}  WEAPON ${game.player.weapon.name}`,
     `ENEMIES ${game.enemies.enemies.length}  PADS ${input.padCount}  STATE ${state.toUpperCase()}`
   ];
   const h = 16 + lines.length * 14;
-  ctx.fillStyle = 'rgba(3, 10, 18, 0.82)';
-  ctx.strokeStyle = 'rgba(70, 244, 255, 0.35)';
+  ctx.fillStyle = 'rgba(4, 6, 11, 0.82)';
+  ctx.strokeStyle = 'rgba(255, 183, 71, 0.35)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, 8);
@@ -600,8 +572,8 @@ function render(now) {
     const cam = game.getCamera(renderAlpha);
     camX = cam.x;
     camY = cam.y;
-    wctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
-    wctx.clearRect(0, 0, view.w, view.h);
+    wctx.setTransform(1, 0, 0, 1, 0, 0);
+    wctx.clearRect(0, 0, worldCanvas.width, worldCanvas.height);
     game.drawWorld(wctx, renderAlpha, camX, camY);
   } else {
     drawMenuBackdrop(now);
@@ -610,7 +582,7 @@ function render(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
-  ctx.fillStyle = '#04010a';
+  ctx.fillStyle = '#04060b';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   let shakeX = 0;
@@ -627,7 +599,7 @@ function render(now) {
   if (game && game.particles.flash > 0.01) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = `rgba(255, 47, 142, ${game.particles.flash * 0.4})`;
+    ctx.fillStyle = `rgba(255, 183, 71, ${game.particles.flash * 0.34})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = 'source-over';
   }
@@ -687,18 +659,21 @@ function frame(now) {
 
 try {
   if (typeof window !== 'undefined' && typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug')) {
-    window.__PROTOCOL_SWARM__ = {
+    window.__PROTOCOL_WARFORGE__ = {
       get game() { return game; },
       get state() { return state; },
       get save() { return save; },
       get menu() { return menu; },
       get hud() { return hud; },
       startGame,
-      chooseDraft,
-      rerollDraft,
+      pauseGame,
+      resumeGame,
+      abortRun,
+      backToMenu,
       toggleMute,
       togglePause,
-      renderer: { canvas, ctx, view }
+      requestImmersive,
+      renderer: { canvas, ctx, view, app, shell }
     };
   }
 } catch (err) {

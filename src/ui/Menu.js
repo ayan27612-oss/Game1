@@ -1,13 +1,16 @@
 import { META_UNLOCKS, DEFAULT_SETTINGS } from '../systems/Upgrades.js';
-import { DOCTRINES, isDoctrineUnlocked } from '../systems/Doctrines.js';
-import { SHIP_STYLES, SHIP_PALETTES, ALLY_PALETTES, drawShipBody } from '../systems/Customization.js';
+import { ARMOR_MARKS, getArmorMark, isArmorMarkUnlocked } from '../systems/Doctrines.js';
+import { ARMOR_FRAMES, SHIP_PALETTES, ALLY_PALETTES, drawArmorBody } from '../systems/Customization.js';
+import { WEAPONS } from '../systems/Weapons.js';
 import { formatTime } from '../engine/MathUtils.js';
 
 const el = (id) => document.getElementById(id);
 
 /**
- * Owns the command deck: tabbed menu, doctrine pick, hangar, meta lab,
- * archive, settings, briefing, and fullscreen/wake-lock plumbing.
+ * Command deck. Five tabs: deploy, armory, fabricator, archive, settings.
+ * There is no drafting, no level and no abilities — the selected armor mark and
+ * the five-weapon rack are the entire build, so the deck only manages the mark,
+ * cosmetics, permanent unlocks and local records.
  */
 export class Menu {
   constructor({ save, audio, onStart, toast, onSettingsChange }) {
@@ -19,7 +22,7 @@ export class Menu {
 
     this.menu = el('menu');
     this.briefing = el('briefing');
-    this.doctrineList = el('doctrine-list');
+    this.markList = el('mark-list');
     this.metaShop = el('meta-shop');
     this.menuScores = el('menu-scores');
     this.archiveScores = el('archive-scores');
@@ -29,15 +32,16 @@ export class Menu {
     this.metaBalance = el('meta-balance');
     this.menuBest = el('menu-best');
     this.menuRuns = el('menu-runs');
-    this.hangarCanvas = el('hangar-preview');
-    this.hangarCtx = this.hangarCanvas ? this.hangarCanvas.getContext('2d') : null;
+    this.armoryWeapons = el('armory-weapons');
+    this.armoryCanvas = el('hangar-preview');
+    this.armoryCtx = this.armoryCanvas ? this.armoryCanvas.getContext('2d') : null;
     this.wakeLock = null;
     this.activeTab = 'deploy';
     this.briefingCloseMode = 'dismiss';
 
     this._bindTabs();
-    this._bindDoctrines();
-    this._bindHangar();
+    this._bindMarks();
+    this._bindArmory();
     this._bindSettings();
     this._bindBriefing();
     this._bindFullscreen();
@@ -71,8 +75,8 @@ export class Menu {
     for (let i = 0; i < panels.length; i++) {
       panels[i].classList.toggle('active', panels[i].id === `panel-${name}`);
     }
-    if (name === 'hangar') this.refreshHangar();
-    if (name === 'meta' || name === 'archive') this.refreshCareer();
+    if (name === 'armory') this.refreshArmory();
+    if (name === 'fabricator' || name === 'archive') this.refreshCareer();
     this.audio.ui();
   }
 
@@ -83,38 +87,39 @@ export class Menu {
     }
   }
 
-  _bindDoctrines() {
-    if (!this.doctrineList) return;
-    this.doctrineList.addEventListener('click', (e) => {
-      const card = e.target.closest('.doctrine-card');
+  _bindMarks() {
+    if (!this.markList) return;
+    this.markList.addEventListener('click', (e) => {
+      const card = e.target.closest('.mark-card');
       if (!card) return;
-      const doctrine = DOCTRINES.find((d) => d.id === card.dataset.id);
-      if (!doctrine) return;
-      if (!isDoctrineUnlocked(doctrine, this.save)) {
-        this.toast(`LOCKED // UNLOCK ${doctrine.unlock.replace(/_/g, ' ').toUpperCase()} IN THE META LAB`);
+      const mark = ARMOR_MARKS.find((m) => m.id === card.dataset.id);
+      if (!mark) return;
+      if (!isArmorMarkUnlocked(mark, this.save)) {
+        this.toast(`LOCKED // BUILD ${mark.unlock.replace(/_/g, ' ').toUpperCase()} IN THE FABRICATOR`);
         this.audio.ui();
         return;
       }
-      this.save.setDoctrine(doctrine.id);
+      this.save.setMark(mark.id);
       this.audio.select();
-      this.renderDoctrines();
+      this.renderMarks();
+      this.refreshHeader();
     });
   }
 
-  _bindHangar() {
+  _bindArmory() {
     const buttons = document.querySelectorAll('.hangar-btn');
     for (let i = 0; i < buttons.length; i++) {
       buttons[i].addEventListener('click', () => {
         const part = buttons[i].dataset.part;
         const dir = Number(buttons[i].dataset.dir) || 1;
-        const len = part === 'style' ? SHIP_STYLES.length : part === 'palette' ? SHIP_PALETTES.length : ALLY_PALETTES.length;
+        const len = part === 'frame' ? ARMOR_FRAMES.length : part === 'palette' ? SHIP_PALETTES.length : ALLY_PALETTES.length;
         const cfg = this.save.getShipConfig();
         const current = cfg[part] || 0;
         this.save.setShip(part, (current + dir + len) % len);
         this.audio.init();
         this.audio.resume();
         this.audio.select();
-        this.refreshHangar();
+        this.refreshArmory();
       });
     }
 
@@ -125,7 +130,7 @@ export class Menu {
       callsignInput.value = this.save.getShipConfig().callsign;
       this.audio.select();
       this.toast('CALLSIGN UPDATED');
-      this.refreshHangar();
+      this.refreshArmory();
     };
     if (callsignInput) {
       callsignInput.addEventListener('keydown', (e) => {
@@ -146,11 +151,13 @@ export class Menu {
     };
 
     if (music) music.addEventListener('input', () => {
-      el('set-music-value').textContent = `${music.value}%`;
+      const label = el('set-music-value');
+      if (label) label.textContent = `${music.value}%`;
       apply('music', Number(music.value) / 100);
     });
     if (sfx) sfx.addEventListener('input', () => {
-      el('set-sfx-value').textContent = `${sfx.value}%`;
+      const label = el('set-sfx-value');
+      if (label) label.textContent = `${sfx.value}%`;
       apply('sfx', Number(sfx.value) / 100);
     });
 
@@ -160,6 +167,7 @@ export class Menu {
       input.addEventListener('change', () => apply(key, input.checked));
     };
     bindToggle('set-muted', 'muted');
+    bindToggle('set-autofire', 'autoFire');
     bindToggle('set-shake', 'screenShake');
     bindToggle('set-numbers', 'damageNumbers');
     bindToggle('set-motion', 'reducedMotion');
@@ -170,11 +178,11 @@ export class Menu {
 
     const reset = el('btn-reset-save');
     if (reset) reset.addEventListener('click', () => {
-      if (!window.confirm('Reset all progress, credits, unlocks and scores? This cannot be undone.')) return;
+      if (!window.confirm('Reset all progress, credits, unlocks and records? This cannot be undone.')) return;
       this.save.reset();
       this.applySettings(true);
       this.refresh();
-      this.toast('PROGRESS RESET // FRESH PROTOCOL');
+      this.toast('PROGRESS RESET // FRESH FORGE');
       this.audio.ui();
     });
   }
@@ -231,21 +239,24 @@ export class Menu {
       for (let i = 0; i < buttons.length; i++) {
         if (buttons[i]) buttons[i].classList.toggle('active', on);
       }
+      window.dispatchEvent(new Event('resize'));
     });
   }
 
   async toggleFullscreen() {
     try {
       if (!document.fullscreenElement) {
-        const app = el('app');
-        if (app && app.requestFullscreen) await app.requestFullscreen({ navigationUI: 'hide' });
+        const root = document.documentElement;
+        if (root && root.requestFullscreen) {
+          await root.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+        }
         if (screen.orientation && screen.orientation.lock) {
           try { await screen.orientation.lock('landscape'); } catch (err) { /* not supported */ }
         }
         if (navigator.wakeLock && !this.wakeLock) {
           try { this.wakeLock = await navigator.wakeLock.request('screen'); } catch (err) { /* ignore */ }
         }
-        this.toast('FULLSCREEN: LANDSCAPE LOCKED');
+        this.toast('IMMERSIVE MODE // LANDSCAPE LOCKED');
       } else {
         if (screen.orientation && screen.orientation.unlock) {
           try { screen.orientation.unlock(); } catch (err) { /* ignore */ }
@@ -254,8 +265,8 @@ export class Menu {
           try { await this.wakeLock.release(); } catch (err) { /* ignore */ }
           this.wakeLock = null;
         }
-        await document.exitFullscreen();
-        this.toast('FULLSCREEN OFF');
+        await document.exitFullscreen().catch(() => {});
+        this.toast('IMMERSIVE MODE OFF');
       }
     } catch (err) {
       this.toast('FULLSCREEN NOT AVAILABLE');
@@ -275,13 +286,16 @@ export class Menu {
     };
     if (music) {
       music.value = String(Math.round((settings.music ?? DEFAULT_SETTINGS.music) * 100));
-      el('set-music-value').textContent = `${music.value}%`;
+      const label = el('set-music-value');
+      if (label) label.textContent = `${music.value}%`;
     }
     if (sfx) {
       sfx.value = String(Math.round((settings.sfx ?? DEFAULT_SETTINGS.sfx) * 100));
-      el('set-sfx-value').textContent = `${sfx.value}%`;
+      const label = el('set-sfx-value');
+      if (label) label.textContent = `${sfx.value}%`;
     }
     setToggle('set-muted', settings.muted);
+    setToggle('set-autofire', settings.autoFire !== false);
     setToggle('set-shake', settings.screenShake !== false);
     setToggle('set-numbers', settings.damageNumbers !== false);
     setToggle('set-motion', settings.reducedMotion);
@@ -298,11 +312,12 @@ export class Menu {
   }
 
   refresh() {
-    this.renderDoctrines();
+    this.renderMarks();
     this.refreshMeta();
     this.refreshScores();
     this.refreshCareer();
-    this.refreshHangar();
+    this.refreshArmory();
+    this.refreshWeapons();
     this.refreshHeader();
     this.applySettings(false);
   }
@@ -314,42 +329,42 @@ export class Menu {
     if (this.menuRuns) this.menuRuns.textContent = `${this.save.runs} RUNS`;
   }
 
-  renderDoctrines() {
-    if (!this.doctrineList) return;
-    const selected = this.save.doctrine || 'vanguard';
-    this.doctrineList.innerHTML = '';
-    for (let i = 0; i < DOCTRINES.length; i++) {
-      const d = DOCTRINES[i];
-      const unlocked = isDoctrineUnlocked(d, this.save);
+  renderMarks() {
+    if (!this.markList) return;
+    const selected = this.save.mark || 'mark3';
+    this.markList.innerHTML = '';
+    for (let i = 0; i < ARMOR_MARKS.length; i++) {
+      const mark = ARMOR_MARKS[i];
+      const unlocked = isArmorMarkUnlocked(mark, this.save);
       const card = document.createElement('button');
       card.type = 'button';
-      card.className = 'doctrine-card' + (d.id === selected ? ' selected' : '') + (unlocked ? '' : ' locked');
-      card.dataset.id = d.id;
-      card.style.setProperty('--doc', d.color);
-      card.setAttribute('aria-pressed', d.id === selected ? 'true' : 'false');
+      card.className = 'mark-card' + (mark.id === selected ? ' selected' : '') + (unlocked ? '' : ' locked');
+      card.dataset.id = mark.id;
+      card.style.setProperty('--mk', mark.color);
+      card.setAttribute('aria-pressed', mark.id === selected ? 'true' : 'false');
 
       const head = document.createElement('div');
-      head.className = 'dc-head';
-      const icon = document.createElement('span');
-      icon.className = 'dc-icon';
-      icon.textContent = d.name.slice(0, 1);
+      head.className = 'mk-head';
+      const index = document.createElement('span');
+      index.className = 'mk-index';
+      index.textContent = String(i + 1).padStart(2, '0');
       const role = document.createElement('span');
-      role.className = 'dc-role';
-      role.textContent = d.role;
-      head.appendChild(icon);
+      role.className = 'mk-role';
+      role.textContent = mark.role;
+      head.appendChild(index);
       head.appendChild(role);
 
       const name = document.createElement('h4');
-      name.textContent = d.name;
+      name.textContent = mark.name;
 
       const desc = document.createElement('p');
-      desc.textContent = d.desc;
+      desc.textContent = mark.desc;
 
       const bonus = document.createElement('div');
-      bonus.className = 'dc-bonus';
-      for (let j = 0; j < d.bonus.length; j++) {
+      bonus.className = 'mk-bonus';
+      for (let j = 0; j < mark.bonus.length; j++) {
         const b = document.createElement('span');
-        b.textContent = d.bonus[j];
+        b.textContent = mark.bonus[j];
         bonus.appendChild(b);
       }
 
@@ -360,11 +375,11 @@ export class Menu {
 
       if (!unlocked) {
         const lock = document.createElement('div');
-        lock.className = 'dc-lock';
-        lock.textContent = 'LOCKED // META LAB';
+        lock.className = 'mk-lock';
+        lock.textContent = 'LOCKED // FABRICATOR';
         card.appendChild(lock);
       }
-      this.doctrineList.appendChild(card);
+      this.markList.appendChild(card);
     }
   }
 
@@ -435,8 +450,7 @@ export class Menu {
       score.textContent = String(s.score).padStart(6, '0');
       const meta = document.createElement('span');
       meta.className = 'meta';
-      const doc = String(s.doctrine || 'vanguard').toUpperCase();
-      meta.textContent = `${formatTime(s.time)} · LV ${s.level} · ${doc}`;
+      meta.textContent = `${formatTime(s.time)} · T${s.threat} · ${getArmorMark(s.mark).name}`;
       li.appendChild(rank);
       li.appendChild(score);
       li.appendChild(meta);
@@ -450,17 +464,16 @@ export class Menu {
   }
 
   _careerMarkup() {
-    const stats = [
+    return [
       ['RUNS', this.save.runs],
       ['BEST SCORE', this.save.bestScore],
       ['AVERAGE', this.save.averageScore],
-      ['BEST LEVEL', this.save.bestLevel],
-      ['BEST COMBO', this.save.bestCombo],
+      ['BEST THREAT', this.save.bestThreat],
+      ['BEST CHAIN', this.save.bestCombo],
       ['TOTAL KILLS', this.save.totalKills],
       ['TIME PLAYED', formatTime(this.save.totalTime)],
       ['CREDITS', this.save.currency]
     ];
-    return stats;
   }
 
   refreshCareer() {
@@ -485,79 +498,116 @@ export class Menu {
     this.refreshHeader();
   }
 
-  refreshHangar() {
-    if (!this.hangarCtx) return;
+  refreshArmory() {
+    if (!this.armoryCtx) return;
     const cfg = this.save.getShipConfig();
-    const style = SHIP_STYLES[cfg.style % SHIP_STYLES.length] || SHIP_STYLES[0];
+    const frame = ARMOR_FRAMES[cfg.frame % ARMOR_FRAMES.length] || ARMOR_FRAMES[0];
     const pal = SHIP_PALETTES[cfg.palette % SHIP_PALETTES.length] || SHIP_PALETTES[0];
     const ally = ALLY_PALETTES[cfg.ally % ALLY_PALETTES.length] || ALLY_PALETTES[0];
     const cs = el('hangar-callsign');
     if (cs) cs.textContent = cfg.callsign;
-    const styleEl = el('hangar-style');
+    const frameEl = el('hangar-style');
     const palEl = el('hangar-palette');
     const allyEl = el('hangar-ally');
-    if (styleEl) styleEl.textContent = style.name;
+    if (frameEl) frameEl.textContent = frame.name;
     if (palEl) palEl.textContent = pal.name;
     if (allyEl) allyEl.textContent = ally.name;
     const callsignInput = el('callsign-input');
     if (callsignInput && document.activeElement !== callsignInput) callsignInput.value = cfg.callsign;
-    this.drawHangarPreview(cfg);
+    this.drawArmoryPreview(cfg);
   }
 
-  drawHangarPreview(cfg) {
-    const c = this.hangarCtx;
+  refreshWeapons() {
+    if (!this.armoryWeapons) return;
+    this.armoryWeapons.innerHTML = '';
+    for (let i = 0; i < WEAPONS.length; i++) {
+      const weapon = WEAPONS[i];
+      const card = document.createElement('div');
+      card.className = 'weapon-card';
+      card.style.setProperty('--wc', weapon.color);
+      const key = document.createElement('b');
+      key.textContent = weapon.key;
+      const name = document.createElement('span');
+      name.textContent = weapon.name;
+      const desc = document.createElement('i');
+      desc.textContent = weapon.desc;
+      card.appendChild(key);
+      card.appendChild(name);
+      card.appendChild(desc);
+      this.armoryWeapons.appendChild(card);
+    }
+  }
+
+  drawArmoryPreview(cfg) {
+    const c = this.armoryCtx;
     if (!c) return;
-    const canvas = this.hangarCanvas;
+    const canvas = this.armoryCanvas;
     const w = canvas.width;
     const h = canvas.height;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, w, h);
 
-    const bg = c.createRadialGradient(w * 0.42, h * 0.55, 0, w * 0.42, h * 0.55, h * 1.2);
-    bg.addColorStop(0, 'rgba(139, 92, 255, 0.2)');
-    bg.addColorStop(0.5, 'rgba(255, 47, 142, 0.06)');
-    bg.addColorStop(1, 'rgba(4, 1, 10, 0)');
-    c.fillStyle = '#06010f';
+    const bg = c.createRadialGradient(w * 0.5, h * 0.46, 8, w * 0.5, h * 0.46, h * 1.35);
+    bg.addColorStop(0, 'rgba(255, 183, 77, 0.22)');
+    bg.addColorStop(0.42, 'rgba(181, 18, 27, 0.12)');
+    bg.addColorStop(1, 'rgba(3, 6, 12, 0)');
+    c.fillStyle = '#05070d';
     c.fillRect(0, 0, w, h);
     c.fillStyle = bg;
     c.fillRect(0, 0, w, h);
 
-    c.strokeStyle = 'rgba(70, 244, 255, 0.1)';
+    // Hangar gantry floor.
+    c.save();
+    c.strokeStyle = 'rgba(143, 232, 255, 0.09)';
     c.lineWidth = 1;
-    for (let i = 0; i < 11; i++) {
-      const y = h * 0.28 + i * i * 1.6;
+    const horizon = h * 0.34;
+    for (let i = 0; i < 9; i++) {
+      const y = horizon + Math.pow(i / 8, 1.9) * (h - horizon);
       c.beginPath();
       c.moveTo(0, y);
       c.lineTo(w, y);
       c.stroke();
     }
-    for (let i = -7; i <= 7; i++) {
+    for (let i = -8; i <= 8; i++) {
       c.beginPath();
-      c.moveTo(w * 0.42 + i * 10, h * 0.28);
-      c.lineTo(w * 0.42 + i * 78, h);
+      c.moveTo(w * 0.5 + i * 22, horizon);
+      c.lineTo(w * 0.5 + i * 150, h);
       c.stroke();
     }
+    c.restore();
+
+    // Center reactor halo.
+    c.save();
+    c.globalCompositeOperation = 'lighter';
+    const halo = c.createRadialGradient(w * 0.5, h * 0.6, 4, w * 0.5, h * 0.6, h * 0.6);
+    halo.addColorStop(0, 'rgba(143, 232, 255, 0.24)');
+    halo.addColorStop(0.6, 'rgba(255, 183, 77, 0.06)');
+    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    c.fillStyle = halo;
+    c.fillRect(0, 0, w, h);
+    c.restore();
 
     const pal = SHIP_PALETTES[cfg.palette % SHIP_PALETTES.length] || SHIP_PALETTES[0];
+    const frame = cfg.frame % ARMOR_FRAMES.length;
     c.save();
-    c.translate(w * 0.4, h * 0.54);
-    c.scale(3.1, 3.1);
+    c.translate(w * 0.36, h * 0.58);
+    c.scale(4.1, 4.1);
     c.rotate(-Math.PI * 0.5);
-    drawShipBody(c, cfg.style % SHIP_STYLES.length, pal, { pilot: true });
+    drawArmorBody(c, frame, pal, { variant: 'iron', pilot: true });
     c.restore();
 
     const allyPal = ALLY_PALETTES[cfg.ally % ALLY_PALETTES.length] || ALLY_PALETTES[0];
     c.save();
-    c.translate(w * 0.76, h * 0.68);
-    c.scale(1.75, 1.75);
+    c.translate(w * 0.72, h * 0.64);
+    c.scale(2.7, 2.7);
     c.rotate(-Math.PI * 0.5);
-    drawShipBody(c, (cfg.style + 1) % SHIP_STYLES.length, allyPal, {});
+    drawArmorBody(c, (frame + 1) % ARMOR_FRAMES.length, allyPal, { variant: 'war' });
     c.restore();
 
-    c.fillStyle = 'rgba(157, 184, 199, 0.75)';
-    c.font = '10px "SFMono-Regular", Consolas, monospace';
+    c.fillStyle = 'rgba(159, 216, 255, 0.72)';
+    c.font = '600 10px "SFMono-Regular", Consolas, monospace';
     c.textAlign = 'center';
-    c.fillText('OPERATOR', w * 0.4, h - 10);
-    c.fillText('WINGMAN', w * 0.76, h - 10);
+    c.fillText('IRON MAN', w * 0.36, h - 12);
+    c.fillText('WAR MACHINE', w * 0.72, h - 12);
   }
 }

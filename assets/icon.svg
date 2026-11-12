@@ -1,26 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PROTOCOL: SWARM">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PROTOCOL: WARFORGE">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#150826"/>
-      <stop offset=".5" stop-color="#06010f"/>
-      <stop offset="1" stop-color="#1c0629"/>
+    <linearGradient id="bg" x1="0" y1="0" x2=".65" y2="1">
+      <stop offset="0" stop-color="#05070d"/>
+      <stop offset=".55" stop-color="#0b1019"/>
+      <stop offset="1" stop-color="#24100a"/>
     </linearGradient>
-    <radialGradient id="halo" cx=".5" cy=".42" r=".6">
-      <stop offset="0" stop-color="#ff2f8e" stop-opacity=".34"/>
-      <stop offset=".55" stop-color="#8b5cff" stop-opacity=".12"/>
-      <stop offset="1" stop-color="#04010a" stop-opacity="0"/>
+    <radialGradient id="halo" cx=".5" cy=".46" r=".62">
+      <stop offset="0" stop-color="#ffb347" stop-opacity=".32"/>
+      <stop offset=".42" stop-color="#b5121b" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#04060b" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="core" x1=".2" y1="0" x2=".8" y2="1">
-      <stop offset="0" stop-color="#ffd36b"/>
-      <stop offset=".5" stop-color="#ff2f8e"/>
-      <stop offset="1" stop-color="#b06bff"/>
+    <linearGradient id="plate" x1=".2" y1="0" x2=".8" y2="1">
+      <stop offset="0" stop-color="#ff6a4d"/>
+      <stop offset=".42" stop-color="#d21f26"/>
+      <stop offset="1" stop-color="#6d0a10"/>
     </linearGradient>
-    <filter id="cyanGlow" x="-50%" y="-50%" width="200%" height="200%">
+    <linearGradient id="gold" x1=".2" y1="0" x2=".8" y2="1">
+      <stop offset="0" stop-color="#fff3c4"/>
+      <stop offset=".45" stop-color="#ffd76a"/>
+      <stop offset="1" stop-color="#b4811f"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2feff"/>
+      <stop offset=".5" stop-color="#8fe8ff"/>
+      <stop offset="1" stop-color="#3bb6e8"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
       <feGaussianBlur stdDeviation="7" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <filter id="pinkGlow" x="-80%" y="-80%" width="260%" height="260%">
-      <feGaussianBlur stdDeviation="12" result="blur"/>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
@@ -28,33 +38,45 @@
   <rect width="512" height="512" fill="url(#bg)"/>
   <rect width="512" height="512" fill="url(#halo)"/>
 
-  <g stroke="#46f4ff" stroke-opacity=".08" stroke-width="1">
+  <g fill="none" stroke="#8fe8ff" stroke-opacity=".07" stroke-width="1">
     <path d="M0 128h512M0 256h512M0 384h512M128 0v512M256 0v512M384 0v512"/>
-    <circle cx="256" cy="256" r="212" fill="none"/>
   </g>
 
-  <g filter="url(#cyanGlow)" fill="none">
-    <circle cx="256" cy="256" r="152" stroke="#46f4ff" stroke-width="9" stroke-linecap="round" stroke-dasharray="150 46" transform="rotate(-24 256 256)"/>
-    <circle cx="256" cy="256" r="116" stroke="#46f4ff" stroke-opacity=".35" stroke-width="2"/>
-    <path d="M256 58v38M256 416v38M58 256h38M416 256h38" stroke="#46f4ff" stroke-width="8" stroke-linecap="round"/>
+  <g fill="none" filter="url(#soft)">
+    <circle cx="256" cy="252" r="196" stroke="#ffb347" stroke-opacity=".55" stroke-width="3" stroke-dasharray="128 40" transform="rotate(-18 256 252)"/>
+    <circle cx="256" cy="252" r="170" stroke="#ff4b3a" stroke-opacity=".35" stroke-width="2"/>
   </g>
 
-  <g filter="url(#pinkGlow)">
-    <path d="M256 148l108 108-108 108-108-108z" fill="url(#core)" opacity=".18"/>
-    <path d="M256 174l82 82-82 82-82-82z" fill="none" stroke="#ff2f8e" stroke-width="7" stroke-linejoin="round"/>
-    <path d="M256 210l46 46-46 46-46-46z" fill="url(#core)" stroke="#ffd7f2" stroke-width="3" stroke-linejoin="round"/>
+  <g filter="url(#soft)">
+    <path d="M256 70c74 0 114 50 114 124v88c0 66-46 124-114 158-68-34-114-92-114-158v-88c0-74 40-124 114-124z" fill="url(#plate)" stroke="#ffd76a" stroke-width="5"/>
+    <path d="M170 236h-26c-8 18-12 40-12 62 0 46 18 88 52 120l18-16c-26-28-42-64-42-104 0-22 4-42 10-62z" fill="#8d1119" stroke="#ffd76a" stroke-width="3"/>
+    <path d="M342 236h26c8 18 12 40 12 62 0 46-18 88-52 120l-18-16c26-28 42-64 42-104 0-22-4-42-10-62z" fill="#8d1119" stroke="#ffd76a" stroke-width="3"/>
+
+    <path d="M256 114c48 0 72 40 72 100v62c0 54-30 98-72 124-42-26-72-70-72-124v-62c0-60 24-100 72-100z" fill="url(#gold)" stroke="#fff3c4" stroke-width="2"/>
+    <path d="M256 132v266" stroke="#b4811f" stroke-width="2" stroke-opacity=".5"/>
+    <path d="M206 186c18-14 82-14 100 0" fill="none" stroke="#b4811f" stroke-width="3" stroke-opacity=".6"/>
+
+    <g filter="url(#glow)">
+      <path d="M203 210l43 6-4 24-40-7z" fill="url(#visor)"/>
+      <path d="M309 210l-43 6 4 24 40-7z" fill="url(#visor)"/>
+    </g>
+
+    <g fill="none" stroke="#7c5a24" stroke-width="4" stroke-linecap="round">
+      <path d="M222 330h68"/>
+      <path d="M229 346h54"/>
+      <path d="M237 362h38"/>
+    </g>
+    <path d="M256 286l17 30-17 14-17-14z" fill="#e8b64a" stroke="#7c5a24" stroke-width="2"/>
   </g>
 
-  <g fill="#59ffa8">
-    <circle cx="256" cy="92" r="7"/>
-    <circle cx="382" cy="162" r="5"/>
-    <circle cx="406" cy="322" r="7"/>
-    <circle cx="292" cy="414" r="5"/>
-    <circle cx="132" cy="376" r="7"/>
-    <circle cx="108" cy="196" r="5"/>
+  <g fill="#8fe8ff" filter="url(#glow)">
+    <circle cx="256" cy="252" r="5" opacity=".8"/>
+    <circle cx="130" cy="158" r="4" opacity=".7"/>
+    <circle cx="386" cy="348" r="5" opacity=".65"/>
+    <circle cx="112" cy="344" r="3" opacity=".5"/>
   </g>
 
-  <g fill="none" stroke="#ffc857" stroke-width="3" stroke-linecap="round" opacity=".8">
-    <path d="M174 134l16 16M338 362l16 16M356 146l-14 14M156 356l14 14"/>
+  <g fill="none" stroke="#ffd76a" stroke-width="3" stroke-linecap="round" opacity=".85">
+    <path d="M206 94l14 16M306 94l-14 16M414 252h-22M120 252h-22"/>
   </g>
 </svg>

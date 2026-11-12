@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "PROTOCOL: SWARM",
-  "short_name": "SWARM",
-  "description": "Neon arena roguelite protocol. Draft modules, stack synergies, and survive the swarm.",
+  "name": "PROTOCOL: WARFORGE",
+  "short_name": "WARFORGE",
+  "description": "Fly as Iron Man with War Machine at your side. Five weapons, four armor marks, endless hostiles.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "./",
@@ -10,8 +10,8 @@
   "display": "fullscreen",
   "display_override": ["fullscreen", "standalone"],
   "orientation": "landscape",
-  "background_color": "#04010a",
-  "theme_color": "#04010a",
+  "background_color": "#04060b",
+  "theme_color": "#04060b",
   "categories": ["games", "entertainment"],
   "prefer_related_applications": false,
   "icons": [

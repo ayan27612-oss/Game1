@@ -1,9 +1,9 @@
 {
-  "name": "protocol-swarm",
-  "version": "2.0.0",
+  "name": "protocol-warforge",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
-  "description": "PROTOCOL: SWARM — zero-dependency neon twin-stick roguelite arena survival.",
+  "description": "PROTOCOL: WARFORGE — zero-dependency Iron Man + War Machine arena survival.",
   "homepage": "https://firstgametesting.vercel.app",
   "repository": {
     "type": "git",

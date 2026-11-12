@@ -41,6 +41,8 @@ export class AudioSynth {
     this.lastWave = 0;
     this.lastWarning = 0;
     this.lastEnemyShot = 0;
+    this.lastRepulsor = 0;
+    this.lastMinigun = 0;
   }
 
   init() {
@@ -344,16 +346,6 @@ export class AudioSynth {
     this._tone(420, 'sawtooth', now, 0.5, 0.1, this.sfxBus, 60, 800);
   }
 
-  levelUp() {
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    const notes = [523.25, 659.25, 783.99, 1046.5];
-    for (let i = 0; i < notes.length; i++) {
-      this._tone(notes[i], 'triangle', now + i * 0.075, 0.24, 0.1, this.sfxBus);
-      this._tone(notes[i] * 2, 'sine', now + i * 0.075, 0.18, 0.035, this.sfxBus);
-    }
-  }
-
   boss() {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
@@ -426,5 +418,83 @@ export class AudioSynth {
       this._tone(notes[i], 'sawtooth', now + i * 0.16, 0.5, 0.08, this.sfxBus, null, 1200);
     }
     this._noise(now, 0.7, 0.1, 800, 'lowpass', 0.7);
+  }
+
+  /* ------------------------------ Iron Man rack ----------------------------- */
+
+  repulsor() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastRepulsor < 0.032) return;
+    this.lastRepulsor = now;
+    this._tone(1750, 'sine', now, 0.09, 0.085, this.sfxBus, 520, 5200);
+    this._tone(2600, 'triangle', now, 0.05, 0.032, this.sfxBus, 1100);
+    this._noise(now, 0.045, 0.03, 6200, 'highpass', 1.2);
+  }
+
+  unibeam() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this._noise(now, 0.32, 0.15, 2400, 'bandpass', 1.6);
+    this._tone(940, 'sawtooth', now, 0.3, 0.11, this.sfxBus, 120, 3600);
+    this._tone(180, 'sine', now, 0.38, 0.18, this.sfxBus, 52);
+    this._tone(1880, 'triangle', now + 0.015, 0.16, 0.05, this.sfxBus, 900);
+  }
+
+  microMissiles() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const t = now + i * 0.055;
+      this._noise(t, 0.2, 0.08, 2800, 'bandpass', 1.4);
+      this._tone(420, 'sawtooth', t, 0.18, 0.04, this.sfxBus, 1500, 2200);
+    }
+    this._tone(140, 'sine', now, 0.16, 0.08, this.sfxBus, 70);
+  }
+
+  arc() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this._noise(now, 0.2, 0.12, 4800, 'bandpass', 3.2);
+    this._tone(1650, 'sawtooth', now, 0.16, 0.055, this.sfxBus, 340, 4200);
+    this._tone(820, 'square', now + 0.02, 0.12, 0.035, this.sfxBus, 220);
+  }
+
+  scatter() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this._noise(now, 0.24, 0.2, 1500, 'lowpass', 0.9);
+    this._tone(240, 'square', now, 0.22, 0.11, this.sfxBus, 70, 1600);
+    this._tone(640, 'triangle', now + 0.012, 0.14, 0.05, this.sfxBus, 180);
+  }
+
+  missileBarrage() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (let i = 0; i < 4; i++) {
+      const t = now + i * 0.07;
+      this._noise(t, 0.26, 0.075, 2200, 'bandpass', 1.5);
+      this._tone(300 + i * 40, 'sawtooth', t, 0.22, 0.045, this.sfxBus, 1200, 1800);
+    }
+    this._tone(120, 'sine', now, 0.22, 0.1, this.sfxBus, 58);
+  }
+
+  minigun() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastMinigun < 0.045) return;
+    this.lastMinigun = now;
+    this._tone(1380, 'triangle', now, 0.045, 0.03, this.sfxBus, 620, 3800);
+    this._noise(now, 0.035, 0.028, 5200, 'highpass', 1.1);
+  }
+
+  combo() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const notes = [659.25, 830.61, 987.77, 1318.5];
+    for (let i = 0; i < notes.length; i++) {
+      this._tone(notes[i], 'triangle', now + i * 0.045, 0.2, 0.06, this.sfxBus);
+      this._tone(notes[i] * 2, 'sine', now + i * 0.045, 0.12, 0.02, this.sfxBus);
+    }
   }
 }
